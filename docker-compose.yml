@@ -1,0 +1,35 @@
+# One-command deployment on any VPS with Docker installed:
+#   docker compose up -d --build
+# Then open http://YOUR_SERVER_IP:3000
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: workpulse
+      POSTGRES_PASSWORD: change-this-password
+      POSTGRES_DB: workpulse
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workpulse -d workpulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://workpulse:change-this-password@db:5432/workpulse?sslmode=disable
+      OWNER_NAME: Ahsan Habib
+      OWNER_DEPARTMENT: Customer Support
+      SEED_DEMO_DATA: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata:
