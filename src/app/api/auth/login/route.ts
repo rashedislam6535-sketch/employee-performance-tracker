@@ -18,23 +18,24 @@ export async function POST(request: Request) {
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanPassword = String(password).trim();
 
-    // 1. Try checking memory store first / fallback
+    // --- Memory Store ---
     const store = getMemoryStore();
     const memUser = store.users.find((u) => u.email.toLowerCase() === cleanEmail);
-    const expectedPass = store.passwords[cleanEmail];
 
-    // If memory store user matches
     if (memUser) {
-      // Check password (or accept demo password)
-      if (expectedPass && expectedPass !== cleanPassword && cleanPassword !== "admin" && cleanPassword !== "password123") {
-        return NextResponse.json({ error: "Invalid password. Please check your credentials." }, { status: 401 });
+      const expectedPass = store.passwords[cleanEmail];
+
+      // Strict password check — no backdoor bypasses
+      if (!expectedPass || expectedPass !== cleanPassword) {
+        return NextResponse.json({ error: "Incorrect password. Please try again." }, { status: 401 });
       }
 
-      // If logging into admin sector, ensure user is admin or manager
+      // Admin portal access check
       if (role === "admin" && memUser.role !== "admin" && memUser.role !== "manager") {
-        return NextResponse.json({
-          error: "Access Denied: This account does not have Admin or Manager permissions.",
-        }, { status: 403 });
+        return NextResponse.json(
+          { error: "Access Denied: Your account does not have Admin clearance. Contact your administrator." },
+          { status: 403 }
+        );
       }
 
       const memEmp = store.employees.find((e) => e.userId === memUser.id) || {
@@ -62,39 +63,45 @@ export async function POST(request: Request) {
       });
     }
 
-    // 2. Try Postgres DB if available
+    // --- Postgres DB fallback ---
     try {
       if (process.env.DATABASE_URL) {
         const dbUsers = await db.select().from(users).where(eq(users.email, cleanEmail)).limit(1);
         const dbUser = dbUsers[0];
 
         if (dbUser) {
-          if (dbUser.password && dbUser.password !== "not-used" && dbUser.password !== cleanPassword) {
-            return NextResponse.json({ error: "Invalid password." }, { status: 401 });
+          if (dbUser.password && dbUser.password !== cleanPassword) {
+            return NextResponse.json({ error: "Incorrect password. Please try again." }, { status: 401 });
           }
 
           if (role === "admin" && dbUser.role !== "admin" && dbUser.role !== "manager") {
-            return NextResponse.json({
-              error: "Access Denied: Admin clearance is required to access the Admin Sector.",
-            }, { status: 403 });
+            return NextResponse.json(
+              { error: "Access Denied: Admin clearance is required to enter the Admin Sector." },
+              { status: 403 }
+            );
           }
 
-          const dbEmp = (await db.select().from(employees).where(eq(employees.userId, dbUser.id)).limit(1))[0];
-          const empProfile = dbEmp ? toProfile(dbEmp) : {
-            id: dbUser.id,
-            userId: dbUser.id,
-            name: dbUser.name,
-            nickname: dbUser.name.split(" ")[0],
-            photo: dbUser.avatar || null,
-            dob: null,
-            phone: null,
-            bloodGroup: null,
-            email: dbUser.email,
-            department: dbUser.department,
-            designation: dbUser.role === "admin" ? "Administrator" : "Employee",
-            employeeCode: `EMP-${1000 + dbUser.id}`,
-            availability: "available",
-          };
+          const dbEmp = (
+            await db.select().from(employees).where(eq(employees.userId, dbUser.id)).limit(1)
+          )[0];
+
+          const empProfile = dbEmp
+            ? toProfile(dbEmp)
+            : {
+                id: dbUser.id,
+                userId: dbUser.id,
+                name: dbUser.name,
+                nickname: dbUser.name.split(" ")[0],
+                photo: dbUser.avatar || null,
+                dob: null,
+                phone: null,
+                bloodGroup: null,
+                email: dbUser.email,
+                department: dbUser.department,
+                designation: dbUser.role === "admin" ? "Administrator" : "Employee",
+                employeeCode: `EMP-${1000 + dbUser.id}`,
+                availability: "available",
+              };
 
           return NextResponse.json({
             success: true,
@@ -115,9 +122,10 @@ export async function POST(request: Request) {
       console.warn("DB login attempt bypassed:", dbErr);
     }
 
-    return NextResponse.json({
-      error: "No account found matching this email address. Please check your spelling or choose a quick demo profile.",
-    }, { status: 404 });
+    return NextResponse.json(
+      { error: "No account found with this email address. Please register first." },
+      { status: 404 }
+    );
   } catch (err: any) {
     console.error("Login route error:", err);
     return NextResponse.json({ error: err.message || "Login failed" }, { status: 500 });

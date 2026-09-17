@@ -68,7 +68,7 @@ export function Avatar({
 }
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { currentUser, employee, activeTab, setActiveTab, theme, toggleTheme, isAdmin, logout, availableAccounts, switchUser } = useApp();
+  const { currentUser, employee, activeTab, setActiveTab, theme, toggleTheme, isAdmin, logout } = useApp();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const avail = availabilityMeta(employee?.availability);
@@ -199,37 +199,17 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <p className="text-[11px] text-zinc-500 truncate">{currentUser?.email}</p>
               </div>
 
-              {/* Quick Switch Perspective */}
-              <div className="py-1">
-                <p className="px-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
-                  Switch Account View
-                </p>
-                <div className="space-y-0.5 max-h-36 overflow-y-auto">
-                  {availableAccounts.map((acc) => (
-                    <button
-                      key={acc.user.id}
-                      onClick={() => {
-                        switchUser(acc.user.id);
-                        setAccountMenuOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-left transition ${
-                        currentUser?.id === acc.user.id
-                          ? "bg-indigo-50 font-medium text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
-                          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                      }`}
-                    >
-                      <img
-                        src={acc.employee.photo || acc.user.avatar || ""}
-                        alt={acc.user.name}
-                        className="h-5 w-5 rounded-full object-cover"
-                      />
-                      <span className="truncate flex-1">{acc.user.name}</span>
-                      {acc.user.role === "admin" && (
-                        <span className="text-[9px] text-rose-500 font-bold">ADM</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+              {/* Role badge */}
+              <div className="py-1 px-2 mb-1">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    isAdmin
+                      ? "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                      : "bg-indigo-500/10 text-indigo-500 border border-indigo-500/20"
+                  }`}
+                >
+                  {isAdmin ? "Administrator" : "Employee"}
+                </span>
               </div>
 
               <div className="border-t border-zinc-100 dark:border-zinc-800 pt-1 mt-1">

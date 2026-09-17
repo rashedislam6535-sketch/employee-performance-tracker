@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { User, NotificationItem, EmployeeProfile } from "@/types";
 import { toDateStr } from "@/lib/utils";
-import { DEMO_USERS } from "@/lib/auth";
+
 
 type Theme = "light" | "dark";
 
@@ -34,7 +34,6 @@ interface AppContextType {
   login: (credentials: { email: string; password?: string; role?: string }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   switchUser: (userId: number) => Promise<void>;
-  availableAccounts: Array<{ user: User; employee: EmployeeProfile }>;
   notifications: NotificationItem[];
   unreadCount: number;
   markNotificationAsRead: (id: number) => void;
@@ -91,11 +90,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [confirmState, setConfirmState] = useState<AppContextType["confirmState"]>(null);
   const toastId = useRef(0);
 
-  // Available accounts from DEMO_USERS
-  const availableAccounts = DEMO_USERS.map((d) => ({
-    user: d.user,
-    employee: d.employee,
-  }));
+  // No pre-seeded accounts — admin grants access to others
+  const availableAccounts: Array<{ user: User; employee: EmployeeProfile }> = [];
 
   const dismissToast = useCallback((id: number) => setToasts((prev) => prev.filter((t) => t.id !== id)), []);
 
@@ -206,7 +202,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password: password || "password123", role }),
+          body: JSON.stringify({ email, password: password || "", role }),
         });
 
         const data = await res.json();
@@ -336,7 +332,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         switchUser,
-        availableAccounts,
         notifications,
         unreadCount,
         markNotificationAsRead,

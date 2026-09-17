@@ -10,20 +10,15 @@ import {
   Eye,
   EyeOff,
   ArrowRight,
-  CheckCircle2,
   Sparkles,
-  Sun,
-  Moon,
   Building2,
-  Zap,
   Activity,
   UserPlus,
   HelpCircle,
   Clock,
-  ChevronRight,
   X,
+  KeyRound,
 } from "lucide-react";
-import { DEMO_USERS } from "@/lib/auth";
 
 export function LoginView() {
   const { login, theme, toggleTheme, toast } = useApp();
@@ -43,10 +38,11 @@ export function LoginView() {
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
+  const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [regDepartment, setRegDepartment] = useState("Customer Support");
-  const [regRole, setRegRole] = useState<"employee" | "admin">("employee");
   const [regDesignation, setRegDesignation] = useState("");
   const [regLoading, setRegLoading] = useState(false);
+  const [showRegPass, setShowRegPass] = useState(false);
 
   // Time ticker
   const [currentTime, setCurrentTime] = useState("");
@@ -68,30 +64,10 @@ export function LoginView() {
     return () => clearInterval(timer);
   }, []);
 
-  // Pre-fill demo credentials on tab change
   const handleTabChange = (portal: "employee" | "admin") => {
     setActivePortal(portal);
-    setErrorMsg("");
-    if (portal === "admin") {
-      const adminAcc = DEMO_USERS.find((d) => d.user.role === "admin");
-      if (adminAcc) {
-        setEmail(adminAcc.user.email);
-        setPassword(adminAcc.password);
-      }
-    } else {
-      const empAcc = DEMO_USERS.find((d) => d.user.role === "employee");
-      if (empAcc) {
-        setEmail(empAcc.user.email);
-        setPassword(empAcc.password);
-      }
-    }
-  };
-
-  // 1-Click Quick Select
-  const handleQuickSelect = (demo: (typeof DEMO_USERS)[0]) => {
-    setActivePortal(demo.user.role === "admin" ? "admin" : "employee");
-    setEmail(demo.user.email);
-    setPassword(demo.password);
+    setEmail("");
+    setPassword("");
     setErrorMsg("");
   };
 
@@ -123,6 +99,14 @@ export function LoginView() {
       toast({ title: "Missing fields", description: "Please complete all required fields.", variant: "error" });
       return;
     }
+    if (regPassword !== regConfirmPassword) {
+      toast({ title: "Password mismatch", description: "Passwords do not match.", variant: "error" });
+      return;
+    }
+    if (regPassword.length < 6) {
+      toast({ title: "Weak password", description: "Password must be at least 6 characters.", variant: "error" });
+      return;
+    }
 
     setRegLoading(true);
     try {
@@ -134,7 +118,6 @@ export function LoginView() {
           email: regEmail,
           password: regPassword,
           department: regDepartment,
-          role: regRole,
           designation: regDesignation,
         }),
       });
@@ -146,13 +129,21 @@ export function LoginView() {
       }
 
       toast({
-        title: "Account Created!",
-        description: `Welcome aboard, ${data.user.name}. Logging you in now...`,
+        title: data.user.role === "admin" ? "Admin account created!" : "Account Created!",
+        description:
+          data.user.role === "admin"
+            ? `Welcome, ${data.user.name}! You are the system administrator.`
+            : `Welcome aboard, ${data.user.name}! Logging you in now...`,
         variant: "success",
       });
 
       setShowRegister(false);
-      await login({ email: regEmail, password: regPassword, role: regRole });
+      // Auto-login — use the correct portal based on actual assigned role
+      await login({
+        email: regEmail,
+        password: regPassword,
+        role: data.user.role === "admin" ? "admin" : "employee",
+      });
     } catch (err: any) {
       toast({ title: "Registration error", description: err.message, variant: "error" });
     } finally {
@@ -201,14 +192,6 @@ export function LoginView() {
             <span className="tabular-nums font-mono text-zinc-300">{currentTime || "00:00:00"}</span>
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
           </div>
-
-          <button
-            onClick={toggleTheme}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-white hover:border-zinc-700 transition"
-            title="Toggle Theme"
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
         </div>
       </header>
 
@@ -235,7 +218,7 @@ export function LoginView() {
               onClick={() => handleTabChange("admin")}
               className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-semibold transition-all ${
                 activePortal === "admin"
-                  ? "bg-gradient-to-r from-rose-950/80 to-indigo-950/80 text-white shadow-md border border-rose-500/40 text-rose-200"
+                  ? "bg-gradient-to-r from-rose-950/80 to-indigo-950/80 text-white shadow-md border border-rose-500/40"
                   : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
               }`}
             >
@@ -246,7 +229,7 @@ export function LoginView() {
 
           {/* Login Card */}
           <div className="rounded-2xl border border-zinc-800/90 bg-zinc-900/80 p-6 sm:p-8 backdrop-blur-xl shadow-2xl shadow-black/60 relative overflow-hidden">
-            {/* Sector Banner Glow */}
+            {/* Sector top glow bar */}
             <div
               className={`absolute top-0 inset-x-0 h-1 ${
                 activePortal === "admin"
@@ -298,7 +281,7 @@ export function LoginView() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder={activePortal === "admin" ? "admin@workpulse.io" : "employee@workpulse.io"}
+                    placeholder={activePortal === "admin" ? "admin@yourcompany.io" : "you@yourcompany.io"}
                     className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 pl-10 pr-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
                   />
                 </div>
@@ -371,72 +354,23 @@ export function LoginView() {
               </button>
             </form>
 
-            {/* Quick Demo 1-Click Access Selector */}
-            <div className="mt-6 pt-5 border-t border-zinc-800/80">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400 flex items-center gap-1.5">
-                  <Sparkles className="h-3 w-3 text-amber-400" />
-                  Quick Demo Accounts
-                </span>
-                <span className="text-[10px] text-zinc-500">1-Click Auto-Fill</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                {DEMO_USERS.map((demo) => {
-                  const isSelected = email.toLowerCase() === demo.user.email.toLowerCase();
-                  const isAdminRole = demo.user.role === "admin";
-                  return (
-                    <button
-                      key={demo.user.id}
-                      type="button"
-                      onClick={() => handleQuickSelect(demo)}
-                      className={`flex items-center gap-2 p-2 rounded-lg border text-left transition ${
-                        isSelected
-                          ? isAdminRole
-                            ? "border-rose-500/60 bg-rose-950/30 text-rose-100"
-                            : "border-indigo-500/60 bg-indigo-950/30 text-indigo-100"
-                          : "border-zinc-800/70 bg-zinc-950/40 hover:bg-zinc-800/50 hover:border-zinc-700 text-zinc-300"
-                      }`}
-                    >
-                      <img
-                        src={demo.employee.photo || demo.user.avatar || ""}
-                        alt={demo.user.name}
-                        className="h-7 w-7 rounded-full object-cover border border-zinc-700 shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1">
-                          <p className="truncate text-xs font-semibold">{demo.user.name.split(" ")[0]}</p>
-                          {isAdminRole && (
-                            <span className="text-[9px] bg-rose-500/20 text-rose-400 px-1 rounded font-bold">
-                              ADM
-                            </span>
-                          )}
-                        </div>
-                        <p className="truncate text-[10px] text-zinc-500">{demo.employee.department}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Register Trigger */}
-            <div className="mt-5 text-center">
+            <div className="mt-6 pt-5 border-t border-zinc-800/80 text-center">
               <button
                 type="button"
                 onClick={() => setShowRegister(true)}
                 className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition"
               >
                 <UserPlus className="h-3.5 w-3.5 text-indigo-400" />
-                <span>New Employee? </span>
-                <span className="text-indigo-400 font-medium hover:underline">Register Profile</span>
+                <span>New to WorkPulse? </span>
+                <span className="text-indigo-400 font-medium hover:underline">Create an Account</span>
               </button>
             </div>
           </div>
         </div>
       </main>
 
-      {/* Footer System Specs */}
+      {/* Footer */}
       <footer className="relative z-10 px-6 py-4 max-w-7xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between text-xs text-zinc-400 border-t border-zinc-900 gap-2">
         <div className="flex items-center gap-2">
           <Building2 className="h-3.5 w-3.5 text-zinc-400" />
@@ -451,16 +385,19 @@ export function LoginView() {
 
       {/* New Employee Registration Modal */}
       {showRegister && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl relative">
+            {/* Top glow bar */}
+            <div className="absolute top-0 inset-x-0 h-1 rounded-t-2xl bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-400" />
+
             <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white">
                   <UserPlus className="h-4 w-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">New Employee Registration</h3>
-                  <p className="text-xs text-zinc-400">Create a staff profile on WorkPulse</p>
+                  <h3 className="text-base font-bold text-white">Create Account</h3>
+                  <p className="text-xs text-zinc-400">Join your team on WorkPulse</p>
                 </div>
               </div>
               <button
@@ -471,16 +408,24 @@ export function LoginView() {
               </button>
             </div>
 
+            {/* Info notice */}
+            <div className="mt-4 rounded-lg border border-indigo-500/20 bg-indigo-950/30 px-3 py-2.5 text-xs text-indigo-300 flex items-start gap-2">
+              <Sparkles className="h-3.5 w-3.5 mt-0.5 text-indigo-400 shrink-0" />
+              <span>
+                Your role is assigned automatically. The first person to register becomes the <strong>Administrator</strong>. All subsequent accounts start as <strong>Employee</strong> and can be promoted by the admin.
+              </span>
+            </div>
+
             <form onSubmit={handleRegisterSubmit} className="mt-4 space-y-3.5">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">Full Legal Name *</label>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">Full Name *</label>
                 <input
                   type="text"
                   required
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
-                  placeholder="e.g. Marcus Vance"
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500"
+                  placeholder="e.g. Rajesh Kumar"
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
                 />
               </div>
 
@@ -492,30 +437,16 @@ export function LoginView() {
                     required
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="marcus.v@workpulse.io"
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500"
+                    placeholder="you@company.io"
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">Password *</label>
-                  <input
-                    type="password"
-                    required
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-zinc-300 mb-1">Department</label>
                   <select
                     value={regDepartment}
                     onChange={(e) => setRegDepartment(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500 transition"
                   >
                     <option value="Customer Support">Customer Support</option>
                     <option value="Compliance & KYC">Compliance & KYC</option>
@@ -524,28 +455,56 @@ export function LoginView() {
                     <option value="Operations & Leadership">Operations & Leadership</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">Role Type</label>
-                  <select
-                    value={regRole}
-                    onChange={(e) => setRegRole(e.target.value as "employee" | "admin")}
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-                  >
-                    <option value="employee">Employee / Staff</option>
-                    <option value="admin">Administrator / Manager</option>
-                  </select>
-                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">Designation / Title</label>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">Job Title / Designation</label>
                 <input
                   type="text"
                   value={regDesignation}
                   onChange={(e) => setRegDesignation(e.target.value)}
                   placeholder="e.g. Senior Support Specialist"
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500"
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">Password *</label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      type={showRegPass ? "text" : "password"}
+                      required
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      placeholder="Min 6 characters"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-9 pr-9 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegPass(!showRegPass)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    >
+                      {showRegPass ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">Confirm Password *</label>
+                  <input
+                    type="password"
+                    required
+                    value={regConfirmPassword}
+                    onChange={(e) => setRegConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full rounded-lg border bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition ${
+                      regConfirmPassword && regConfirmPassword !== regPassword
+                        ? "border-rose-500"
+                        : "border-zinc-800"
+                    }`}
+                  />
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-800">
@@ -559,9 +518,9 @@ export function LoginView() {
                 <button
                   type="submit"
                   disabled={regLoading}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+                  className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white hover:from-indigo-500 hover:to-blue-500 disabled:opacity-70 transition"
                 >
-                  {regLoading ? "Registering..." : "Create Account & Sign In"}
+                  {regLoading ? "Creating Account..." : "Create Account & Sign In"}
                 </button>
               </div>
             </form>
@@ -571,14 +530,18 @@ export function LoginView() {
 
       {/* Forgot Password Modal */}
       {showForgot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl relative">
+            <div className="absolute top-0 inset-x-0 h-1 rounded-t-2xl bg-gradient-to-r from-amber-500 to-rose-500" />
             <div className="flex items-center gap-2 mb-3">
               <HelpCircle className="h-5 w-5 text-indigo-400" />
-              <h3 className="text-base font-bold text-white">Reset Credentials</h3>
+              <h3 className="text-base font-bold text-white">Forgot Your Password?</h3>
             </div>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              For security compliance, credentials can be reset by selecting your account from the <strong>Quick Demo Accounts</strong> bar, or with standard password <code className="bg-zinc-800 px-1 py-0.5 rounded text-zinc-200">password123</code> (or <code className="bg-zinc-800 px-1 py-0.5 rounded text-zinc-200">admin</code> for Admin).
+              Password recovery is managed by your system administrator. Please contact your admin to reset your access credentials.
+            </p>
+            <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
+              If you are the administrator, use the account you registered with. Your password is what you set during registration.
             </p>
             <div className="mt-5 flex justify-end">
               <button

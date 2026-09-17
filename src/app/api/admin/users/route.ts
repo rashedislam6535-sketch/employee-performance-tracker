@@ -86,8 +86,16 @@ export async function DELETE(request: Request) {
     }
 
     const store = getMemoryStore();
-    if (userId === 1) {
-      return NextResponse.json({ error: "Cannot delete the root administrator account." }, { status: 400 });
+    const targetUser = store.users.find((u) => u.id === userId);
+    if (!targetUser) {
+      return NextResponse.json({ error: "User not found." }, { status: 404 });
+    }
+    // Prevent deleting the last admin
+    if (targetUser.role === "admin") {
+      const adminCount = store.users.filter((u) => u.role === "admin").length;
+      if (adminCount <= 1) {
+        return NextResponse.json({ error: "Cannot remove the last administrator account." }, { status: 400 });
+      }
     }
 
     store.users = store.users.filter((u) => u.id !== userId);
