@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { reports } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { resolveEmployee, loadEntries, loadAttendance, sumEntries, groupByDate } from "@/lib/data";
+import { getMemoryStore } from "@/lib/dataStore";
 import { addDays, dateKey, formatDuration, isWeekend, parseDateStr, productivityScore, toDateStr, workingDaysBetween } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,19 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
-    const rows = await db.select().from(reports).orderBy(desc(reports.createdAt));
-    const list = rows
-      .filter((r) => !userId || r.userId === Number(userId))
-      .map((r) => ({ ...r, weekStart: dateKey(r.weekStart), weekEnd: dateKey(r.weekEnd), createdAt: new Date(r.createdAt).toISOString() }));
+
+    if (process.env.DATABASE_URL) {
+      try {
+        const rows = await db.select().from(reports).orderBy(desc(reports.createdAt));
+        const list = rows
+          .filter((r) => !userId || r.userId === Number(userId))
+          .map((r) => ({ ...r, weekStart: dateKey(r.weekStart), weekEnd: dateKey(r.weekEnd), createdAt: new Date(r.createdAt).toISOString() }));
+        return NextResponse.json({ reports: list });
+      } catch (e) {}
+    }
+
+    const store = getMemoryStore();
+    const list = store.reports.filter((r) => !userId || r.userId === Number(userId));
     return NextResponse.json({ reports: list });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -106,24 +116,26 @@ export async function POST(request: Request) {
       averageScore: avgScore,
     });
 
-    const [newReport] = await db
-      .insert(reports)
-      .values({
-        userId: user.id,
-        weekStart: start,
-        weekEnd: end,
-        title: `Weekly report · ${start} to ${end}`,
-        content,
-        keyAchievements: achievements.map((a) => `✓ ${a}`).join("\n"),
-        tasksInProgress: inProgress.map((p) => `• ${p}`).join("\n"),
-        nextWeekPlan: plan.map((p) => `• ${p}`).join("\n"),
-        metricsSnapshot,
-      })
-      .returning();
+    const store = getMemoryStore();
+    const newReport = {
+      id: store.reports.length + 1,
+      userId: user.id,
+      weekStart: start,
+      weekEnd: end,
+      title: `Weekly report · ${start} to ${end}`,
+      content,
+      keyAchievements: achievements.map((a) => `✓ ${a}`).join("\n"),
+      tasksInProgress: inProgress.map((p) => `• ${p}`).join("\n"),
+      nextWeekPlan: plan.map((p) => `• ${p}`).join("\n"),
+      metricsSnapshot,
+      createdAt: new Date().toISOString(),
+    };
+
+    store.reports.unshift(newReport);
 
     return NextResponse.json({
       success: true,
-      report: { ...newReport, weekStart: dateKey(newReport.weekStart), weekEnd: dateKey(newReport.weekEnd), createdAt: new Date(newReport.createdAt).toISOString() },
+      report: newReport,
     });
   } catch (error: any) {
     console.error("Report POST Error:", error);
@@ -136,17 +148,18 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const { id, keyAchievements, tasksInProgress, nextWeekPlan, content } = body;
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-    const [updated] = await db
-      .update(reports)
-      .set({
-        ...(keyAchievements !== undefined ? { keyAchievements } : {}),
-        ...(tasksInProgress !== undefined ? { tasksInProgress } : {}),
-        ...(nextWeekPlan !== undefined ? { nextWeekPlan } : {}),
-        ...(content !== undefined ? { content } : {}),
-      })
-      .where(eq(reports.id, Number(id)))
-      .returning();
-    return NextResponse.json({ success: true, report: updated });
+
+    const store = getMemoryStore();
+    const report = store.reports.find((r) => r.id === Number(id));
+    if (report) {
+      if (keyAchievements !== undefined) report.keyAchievements = keyAchievements;
+      if (tasksInProgress !== undefined) report.tasksInProgress = tasksInProgress;
+      if (nextWeekPlan !== undefined) report.nextWeekPlan = nextWeekPlan;
+      if (content !== undefined) report.content = content;
+      return NextResponse.json({ success: true, report });
+    }
+
+    return NextResponse.json({ error: "Report not found" }, { status: 404 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -157,7 +170,9 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-    await db.delete(reports).where(eq(reports.id, Number(id)));
+
+    const store = getMemoryStore();
+    store.reports = store.reports.filter((r) => r.id !== Number(id));
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

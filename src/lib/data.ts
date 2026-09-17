@@ -4,6 +4,7 @@ import { eq, desc, inArray } from "drizzle-orm";
 import { ensureSeedData } from "@/db/seed";
 import { activityLabel, dateKey, emptyTotals, num, taskTypeToActivityType, Totals } from "@/lib/utils";
 import type { AttendanceRecord, Entry, EmployeeProfile, User } from "@/types";
+import { getMemoryStore } from "@/lib/dataStore";
 
 export const publicUser = {
   id: users.id,
@@ -34,64 +35,146 @@ export function toProfile(e: EmployeeRow): EmployeeProfile {
   };
 }
 
-/** Finds the user (or falls back to the first one) and guarantees an employee profile exists. */
+/** Finds the user (or falls back to memory store) and guarantees an employee profile exists. */
 export async function resolveEmployee(userIdParam?: string | number | null): Promise<{ user: User; employee: EmployeeProfile }> {
-  await ensureSeedData();
-  let user = userIdParam
-    ? (await db.select(publicUser).from(users).where(eq(users.id, Number(userIdParam))))[0]
-    : undefined;
-  if (!user) user = (await db.select(publicUser).from(users).orderBy(users.id).limit(1))[0];
-  if (!user) throw new Error("No user found");
+  const store = getMemoryStore();
 
-  let emp = (await db.select().from(employees).where(eq(employees.userId, user.id)).limit(1))[0];
-  if (!emp) {
-    emp = (
-      await db
-        .insert(employees)
-        .values({ userId: user.id, name: user.name, email: user.email, department: user.department })
-        .returning()
-    )[0];
+  // If userId is provided, try resolving from memory store first
+  if (userIdParam) {
+    const memUser = store.users.find((u) => u.id === Number(userIdParam));
+    if (memUser) {
+      const memEmp = store.employees.find((e) => e.userId === memUser.id) || {
+        id: memUser.id,
+        userId: memUser.id,
+        name: memUser.name,
+        nickname: memUser.name.split(" ")[0],
+        photo: memUser.avatar || null,
+        dob: null,
+        phone: null,
+        bloodGroup: null,
+        email: memUser.email,
+        department: memUser.department,
+        designation: memUser.role === "admin" ? "System Administrator" : "Operations Specialist",
+        employeeCode: `EMP-${1000 + memUser.id}`,
+        availability: "available",
+      };
+      return { user: memUser, employee: memEmp };
+    }
   }
-  return { user: user as User, employee: toProfile(emp) };
+
+  // Try PostgreSQL if DATABASE_URL is set
+  if (process.env.DATABASE_URL) {
+    try {
+      await ensureSeedData();
+      let user = userIdParam
+        ? (await db.select(publicUser).from(users).where(eq(users.id, Number(userIdParam))))[0]
+        : undefined;
+      if (!user) user = (await db.select(publicUser).from(users).orderBy(users.id).limit(1))[0];
+      if (user) {
+        let emp = (await db.select().from(employees).where(eq(employees.userId, user.id)).limit(1))[0];
+        if (!emp) {
+          emp = (
+            await db
+              .insert(employees)
+              .values({ userId: user.id, name: user.name, email: user.email, department: user.department })
+              .returning()
+          )[0];
+        }
+        return { user: user as User, employee: toProfile(emp) };
+      }
+    } catch (e) {
+      console.warn("Postgres connection unavailable, utilizing active data store.");
+    }
+  }
+
+  // Fallback to default user in memory store
+  const defaultUser = store.users[1] || store.users[0];
+  const defaultEmp = store.employees.find((e) => e.userId === defaultUser.id) || store.employees[0];
+  return { user: defaultUser, employee: defaultEmp };
 }
 
 /* ---------- Entries (both log tables, normalised) ---------- */
 
 export async function loadEntries(userId: number, employeeId: number): Promise<Entry[]> {
-  const [updates, acts] = await Promise.all([
-    db.select().from(dailyUpdates).where(eq(dailyUpdates.userId, userId)),
-    db.select().from(activities).where(eq(activities.employeeId, employeeId)),
-  ]);
+  const store = getMemoryStore();
 
-  const list: Entry[] = [];
+  // Try PostgreSQL first if available
+  if (process.env.DATABASE_URL) {
+    try {
+      const [updates, acts] = await Promise.all([
+        db.select().from(dailyUpdates).where(eq(dailyUpdates.userId, userId)),
+        db.select().from(activities).where(eq(activities.employeeId, employeeId)),
+      ]);
 
-  for (const u of updates) {
-    list.push({
-      id: `update-${u.id}`,
-      source: "update",
-      rawId: u.id,
-      date: dateKey(u.date),
-      type: taskTypeToActivityType(u.taskType),
-      label: u.taskType,
-      description: u.description,
-      tickets: num(u.tickets),
-      chats: num(u.chats),
-      kyc: num(u.kyc),
-      calls: num(u.calls),
-      emails: num(u.emails),
-      trainingHours: num(u.trainingHours),
-      quantity: null,
-      country: null,
-      accountId: null,
-      ticketCategory: null,
-      priority: null,
-      status: null,
-      attachmentName: u.attachmentName ?? null,
-      createdAt: new Date(u.createdAt).toISOString(),
-    });
+      if (updates.length > 0 || acts.length > 0) {
+        const list: Entry[] = [];
+
+        for (const u of updates) {
+          list.push({
+            id: `update-${u.id}`,
+            source: "update",
+            rawId: u.id,
+            date: dateKey(u.date),
+            type: taskTypeToActivityType(u.taskType),
+            label: u.taskType,
+            description: u.description,
+            tickets: num(u.tickets),
+            chats: num(u.chats),
+            kyc: num(u.kyc),
+            calls: num(u.calls),
+            emails: num(u.emails),
+            trainingHours: num(u.trainingHours),
+            quantity: null,
+            country: null,
+            accountId: null,
+            ticketCategory: null,
+            priority: null,
+            status: null,
+            attachmentName: u.attachmentName ?? null,
+            createdAt: new Date(u.createdAt).toISOString(),
+          });
+        }
+
+        for (const a of acts) {
+          const qty = num(a.quantity);
+          const t = emptyTotals();
+          if (a.type === "kyc") t.kyc = qty;
+          else if (a.type === "ticket") t.tickets = qty || 1;
+          else if (a.type === "chat") t.chats = qty;
+          else if (a.type === "call") t.calls = qty;
+          else if (a.type === "email") t.emails = qty;
+          else if (a.type === "training") t.trainingHours = qty;
+          list.push({
+            id: `activity-${a.id}`,
+            source: "activity",
+            rawId: a.id,
+            date: dateKey(a.date),
+            type: a.type,
+            label: activityLabel(a.type),
+            description: a.description ?? "",
+            ...t,
+            quantity: qty,
+            country: a.country,
+            accountId: a.accountId,
+            ticketCategory: a.ticketCategory,
+            priority: a.priority,
+            status: a.status,
+            attachmentName: null,
+            createdAt: new Date(a.createdAt).toISOString(),
+          });
+        }
+
+        list.sort((x, y) => (x.date === y.date ? y.createdAt.localeCompare(x.createdAt) : y.date.localeCompare(x.date)));
+        return list;
+      }
+    } catch (e) {
+      // fallback to memory
+    }
   }
 
-  for (const a of acts) {
+  // Memory store fallback
+  const userActs = store.activities.filter((a) => a.employeeId === employeeId || a.employeeId === userId);
+  const list: Entry[] = userActs.map((a) => {
     const qty = num(a.quantity);
     const t = emptyTotals();
     if (a.type === "kyc") t.kyc = qty;
@@ -100,7 +183,8 @@ export async function loadEntries(userId: number, employeeId: number): Promise<E
     else if (a.type === "call") t.calls = qty;
     else if (a.type === "email") t.emails = qty;
     else if (a.type === "training") t.trainingHours = qty;
-    list.push({
+
+    return {
       id: `activity-${a.id}`,
       source: "activity",
       rawId: a.id,
@@ -116,9 +200,9 @@ export async function loadEntries(userId: number, employeeId: number): Promise<E
       priority: a.priority,
       status: a.status,
       attachmentName: null,
-      createdAt: new Date(a.createdAt).toISOString(),
-    });
-  }
+      createdAt: a.createdAt,
+    };
+  });
 
   list.sort((x, y) => (x.date === y.date ? y.createdAt.localeCompare(x.createdAt) : y.date.localeCompare(x.date)));
   return list;
@@ -191,11 +275,19 @@ export function buildAttendanceRecord(rec: AttendanceRow, brks: BreakRow[], now 
 }
 
 export async function loadAttendance(employeeId: number): Promise<AttendanceRecord[]> {
-  const rows = await db.select().from(attendance).where(eq(attendance.employeeId, employeeId)).orderBy(desc(attendance.date));
-  if (rows.length === 0) return [];
-  const brks = await db.select().from(breaks).where(inArray(breaks.attendanceId, rows.map((r) => r.id)));
-  const byAtt: Record<number, BreakRow[]> = {};
-  for (const b of brks) (byAtt[b.attendanceId] ||= []).push(b);
-  const now = new Date();
-  return rows.map((r) => buildAttendanceRecord(r, byAtt[r.id] || [], now));
+  if (process.env.DATABASE_URL) {
+    try {
+      const rows = await db.select().from(attendance).where(eq(attendance.employeeId, employeeId)).orderBy(desc(attendance.date));
+      if (rows.length > 0) {
+        const brks = await db.select().from(breaks).where(inArray(breaks.attendanceId, rows.map((r) => r.id)));
+        const byAtt: Record<number, BreakRow[]> = {};
+        for (const b of brks) (byAtt[b.attendanceId] ||= []).push(b);
+        const now = new Date();
+        return rows.map((r) => buildAttendanceRecord(r, byAtt[r.id] || [], now));
+      }
+    } catch (e) {}
+  }
+
+  const store = getMemoryStore();
+  return store.attendance;
 }

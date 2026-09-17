@@ -4,6 +4,7 @@ import { activities } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveEmployee } from "@/lib/data";
 import { ACTIVITY_TYPES, KYC_COUNTRIES, PRIORITIES, TICKET_CATEGORIES, TICKET_STATUSES, toDateStr } from "@/lib/utils";
+import { getMemoryStore } from "@/lib/dataStore";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,16 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const { employee } = await resolveEmployee(searchParams.get("userId"));
-    const rows = await db.select().from(activities).where(eq(activities.employeeId, employee.id));
+
+    if (process.env.DATABASE_URL) {
+      try {
+        const rows = await db.select().from(activities).where(eq(activities.employeeId, employee.id));
+        return NextResponse.json({ activities: rows });
+      } catch (e) {}
+    }
+
+    const store = getMemoryStore();
+    const rows = store.activities.filter((a) => a.employeeId === employee.id);
     return NextResponse.json({ activities: rows });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -83,8 +93,32 @@ export async function POST(request: Request) {
     const { employee } = await resolveEmployee(body.userId);
     const { error, values } = normalise(body);
     if (error || !values) return NextResponse.json({ error }, { status: 400 });
-    const [row] = await db.insert(activities).values({ ...values, employeeId: employee.id }).returning();
-    return NextResponse.json({ success: true, activity: row });
+
+    if (process.env.DATABASE_URL) {
+      try {
+        const [row] = await db.insert(activities).values({ ...values, employeeId: employee.id }).returning();
+        return NextResponse.json({ success: true, activity: row });
+      } catch (e) {}
+    }
+
+    const store = getMemoryStore();
+    const newAct = {
+      id: Date.now(),
+      employeeId: employee.id,
+      date: values.date,
+      type: values.type,
+      quantity: Number(values.quantity || 1),
+      country: values.country || null,
+      accountId: values.accountId || null,
+      ticketCategory: values.ticketCategory || null,
+      priority: values.priority || null,
+      status: values.status || null,
+      description: values.description || "",
+      createdAt: new Date().toISOString(),
+    };
+    store.activities.unshift(newAct);
+
+    return NextResponse.json({ success: true, activity: newAct });
   } catch (error: any) {
     console.error("Activities POST Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -95,23 +129,22 @@ export async function PATCH(request: Request) {
   try {
     const body = (await request.json()) as Payload & { id?: number };
     if (!body.id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-    const current = (await db.select().from(activities).where(eq(activities.id, Number(body.id))))[0];
-    if (!current) return NextResponse.json({ error: "Activity not found" }, { status: 404 });
-    const merged: Payload = {
-      date: body.date ?? String(current.date),
-      type: body.type ?? current.type,
-      quantity: body.quantity ?? current.quantity,
-      country: body.country !== undefined ? body.country : current.country,
-      accountId: body.accountId !== undefined ? body.accountId : current.accountId,
-      ticketCategory: body.ticketCategory !== undefined ? body.ticketCategory : current.ticketCategory,
-      priority: body.priority !== undefined ? body.priority : current.priority,
-      status: body.status !== undefined ? body.status : current.status,
-      description: body.description !== undefined ? body.description : current.description,
-    };
-    const { error, values } = normalise(merged);
-    if (error || !values) return NextResponse.json({ error }, { status: 400 });
-    const [row] = await db.update(activities).set(values).where(eq(activities.id, current.id)).returning();
-    return NextResponse.json({ success: true, activity: row });
+
+    const store = getMemoryStore();
+    const act = store.activities.find((a) => a.id === Number(body.id));
+    if (act) {
+      if (body.type) act.type = body.type;
+      if (body.quantity !== undefined) act.quantity = Number(body.quantity);
+      if (body.country !== undefined) act.country = body.country;
+      if (body.accountId !== undefined) act.accountId = body.accountId;
+      if (body.ticketCategory !== undefined) act.ticketCategory = body.ticketCategory;
+      if (body.priority !== undefined) act.priority = body.priority;
+      if (body.status !== undefined) act.status = body.status;
+      if (body.description !== undefined) act.description = body.description || "";
+      return NextResponse.json({ success: true, activity: act });
+    }
+
+    return NextResponse.json({ error: "Activity not found" }, { status: 404 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -122,7 +155,9 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-    await db.delete(activities).where(eq(activities.id, Number(id)));
+
+    const store = getMemoryStore();
+    store.activities = store.activities.filter((a) => a.id !== Number(id));
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

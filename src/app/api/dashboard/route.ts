@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { notifications } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { resolveEmployee, loadEntries, loadAttendance, sumEntries, groupByDate } from "@/lib/data";
+import { getMemoryStore } from "@/lib/dataStore";
 import {
   addDays,
   isWeekend,
@@ -16,7 +17,7 @@ import {
   weekdayShort,
   workingDaysInMonth,
 } from "@/lib/utils";
-import type { DashboardData, DayPoint } from "@/types";
+import type { DashboardData, DayPoint, NotificationItem } from "@/types";
 
 export const dynamic = "force-dynamic";
 
@@ -102,12 +103,23 @@ export async function GET(request: Request) {
       break;
     }
 
-    const userNotifications = await db
-      .select()
-      .from(notifications)
-      .where(eq(notifications.userId, user.id))
-      .orderBy(desc(notifications.createdAt))
-      .limit(15);
+    let userNotifications: NotificationItem[] = [];
+    if (process.env.DATABASE_URL) {
+      try {
+        const notifs = await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.userId, user.id))
+          .orderBy(desc(notifications.createdAt))
+          .limit(15);
+        userNotifications = notifs.map((n) => ({ ...n, createdAt: new Date(n.createdAt).toISOString() }));
+      } catch (e) {}
+    }
+
+    if (userNotifications.length === 0) {
+      const store = getMemoryStore();
+      userNotifications = store.notifications.filter((n) => n.userId === user.id || n.userId === 1);
+    }
 
     const todayAttendance = attendanceList.find((a) => a.date === todayStr) ?? null;
 
@@ -141,7 +153,7 @@ export async function GET(request: Request) {
       streak,
       recentEntries: entries.slice(0, 8),
       attendance: todayAttendance,
-      notifications: userNotifications.map((n) => ({ ...n, createdAt: new Date(n.createdAt).toISOString() })),
+      notifications: userNotifications,
     };
 
     return NextResponse.json(payload);
