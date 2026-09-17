@@ -62,3 +62,62 @@ export const notifications = pgTable("notifications", {
   isRead: integer("is_read").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/* ---------- Employee management (v2) ---------- */
+
+// One profile per user. Holds personal information, photo and availability.
+export const employees = pgTable("employees", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  nickname: text("nickname"),
+  photo: text("photo"), // data URL (resized on the client)
+  dob: date("dob"),
+  phone: text("phone"),
+  bloodGroup: text("blood_group"),
+  email: text("email"),
+  department: text("department"),
+  designation: text("designation"),
+  employeeCode: text("employee_code"), // human-readable Employee ID
+  availability: text("availability").notNull().default("available"), // available | busy | on_leave | offline
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// One row per employee per day. working_minutes = check_out - check_in - breaks.
+export const attendance = pgTable("attendance", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull().references(() => employees.id, { onDelete: "cascade" }),
+  date: date("date").notNull(),
+  checkIn: timestamp("check_in", { withTimezone: true }),
+  checkOut: timestamp("check_out", { withTimezone: true }),
+  workingMinutes: integer("working_minutes"),
+  location: text("location"),
+  device: text("device"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const breaks = pgTable("breaks", {
+  id: serial("id").primaryKey(),
+  attendanceId: integer("attendance_id").notNull().references(() => attendance.id, { onDelete: "cascade" }),
+  startTime: timestamp("start_time", { withTimezone: true }).notNull(),
+  endTime: timestamp("end_time", { withTimezone: true }),
+  durationMinutes: integer("duration_minutes"),
+});
+
+// Structured activity log: KYC (quantity + country), tickets (MT account, category, priority, status),
+// chats / calls / emails (quantity), training (hours), meetings and other.
+export const activities = pgTable("activities", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull().references(() => employees.id, { onDelete: "cascade" }),
+  date: date("date").notNull(),
+  type: text("type").notNull(), // kyc | ticket | chat | call | email | training | meeting | other
+  quantity: numeric("quantity", { precision: 8, scale: 2 }).notNull().default("1"),
+  country: text("country"),
+  accountId: text("account_id"),
+  ticketCategory: text("ticket_category"),
+  priority: text("priority"),
+  status: text("status"),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

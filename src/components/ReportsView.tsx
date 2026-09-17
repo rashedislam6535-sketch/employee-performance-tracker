@@ -5,6 +5,8 @@ import { useApp } from "@/context/AppContext";
 import { ReportItem } from "@/types";
 import { addDays, downloadFile, formatDate, toDateStr } from "@/lib/utils";
 import { Copy, Check, Download, Printer, Trash2, FileText } from "lucide-react";
+import { exportWeeklyReportPdf } from "@/lib/export";
+import { EmptyState, ListSkeleton } from "@/components/ui/skeleton";
 
 const muted = "text-zinc-500 dark:text-zinc-400";
 const card = "rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900";
@@ -57,8 +59,9 @@ function periodRange(p: Period): { start: string; end: string } {
 }
 
 export function ReportsView() {
-  const { currentUser } = useApp();
+  const { currentUser, employee, toast, confirm } = useApp();
   const [reports, setReports] = useState<ReportItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [period, setPeriod] = useState<Period>("thisWeek");
   const [generating, setGenerating] = useState(false);
@@ -72,12 +75,17 @@ export function ReportsView() {
 
   const load = useCallback(async () => {
     if (!userId) return;
-    const res = await fetch(`/api/reports?userId=${userId}`);
-    if (res.ok) {
-      const data = await res.json();
-      const list: ReportItem[] = data.reports || [];
-      setReports(list);
-      setActiveId((cur) => (cur && list.some((r) => r.id === cur) ? cur : list[0]?.id ?? null));
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/reports?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const list: ReportItem[] = data.reports || [];
+        setReports(list);
+        setActiveId((cur) => (cur && list.some((r) => r.id === cur) ? cur : list[0]?.id ?? null));
+      }
+    } finally {
+      setLoading(false);
     }
   }, [userId]);
 
@@ -99,17 +107,20 @@ export function ReportsView() {
   const generate = async () => {
     if (!userId) return;
     setGenerating(true);
+    const { start, end } = periodRange(period);
     try {
-      const { start, end } = periodRange(period);
       const res = await fetch("/api/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, weekStart: start, weekEnd: end }),
       });
+      const json = await res.json();
       if (res.ok) {
-        const json = await res.json();
         setReports((prev) => [json.report, ...prev]);
         setActiveId(json.report.id);
+        toast({ title: "Report generated", description: `${formatDate(start)} – ${formatDate(end)}`, variant: "success" });
+      } else {
+        toast({ title: "Could not generate report", description: json.error, variant: "error" });
       }
     } finally {
       setGenerating(false);
@@ -128,6 +139,7 @@ export function ReportsView() {
       if (res.ok) {
         setReports((prev) => prev.map((r) => (r.id === active.id ? { ...r, ...draft } : r)));
         setEditing(false);
+        toast({ title: "Report saved", variant: "success" });
       }
     } finally {
       setSaving(false);
@@ -135,9 +147,33 @@ export function ReportsView() {
   };
 
   const remove = async (id: number) => {
-    if (!confirm("Delete this report?")) return;
+    const ok = await confirm({ title: "Delete this report?", description: "The generated text will be removed permanently.", confirmText: "Delete", destructive: true });
+    if (!ok) return;
     const res = await fetch(`/api/reports?id=${id}`, { method: "DELETE" });
-    if (res.ok) setReports((prev) => prev.filter((r) => r.id !== id));
+    if (res.ok) {
+      setReports((prev) => prev.filter((r) => r.id !== id));
+      toast({ title: "Report deleted" });
+    }
+  };
+
+  const downloadPdf = async () => {
+    if (!active) return;
+    try {
+      await exportWeeklyReportPdf({
+        employeeName: employee?.name ?? currentUser?.name ?? "",
+        department: employee?.department ?? currentUser?.department ?? "",
+        weekStart: active.weekStart,
+        weekEnd: active.weekEnd,
+        content: active.content,
+        keyAchievements: draft.keyAchievements,
+        tasksInProgress: draft.tasksInProgress,
+        nextWeekPlan: draft.nextWeekPlan,
+        snapshot,
+      });
+      toast({ title: "PDF downloaded", variant: "success" });
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e?.message, variant: "error" });
+    }
   };
 
   const plainText = () => {
@@ -230,8 +266,14 @@ export function ReportsView() {
           <div className="border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
             <h3 className="text-[13px] font-medium">Saved reports</h3>
           </div>
-          {reports.length === 0 ? (
-            <p className={`px-4 py-8 text-center text-[13px] ${muted}`}>No reports yet.</p>
+          {loading ? (
+            <div className="p-3">
+              <ListSkeleton rows={3} />
+            </div>
+          ) : reports.length === 0 ? (
+            <div className="p-3">
+              <EmptyState compact icon={FileText} title="No reports yet" description="Pick a period and generate your first report." />
+            </div>
           ) : (
             <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {reports.map((r) => (
@@ -258,7 +300,9 @@ export function ReportsView() {
 
         <div className={`${card} lg:col-span-2`}>
           {!active ? (
-            <div className={`px-6 py-16 text-center text-[13px] ${muted}`}>Choose a period and click “Generate report”.</div>
+            <div className="p-6">
+              <EmptyState icon={FileText} title="No report selected" description="Choose a period above and click “Generate report”. Reports are built from your logged activities and attendance." />
+            </div>
           ) : (
             <>
               <div className="no-print flex flex-wrap items-center gap-2 border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
@@ -298,9 +342,12 @@ export function ReportsView() {
                   <Download className="h-3.5 w-3.5" />
                   Markdown
                 </button>
-                <button onClick={() => window.print()} className={btn}>
-                  <Printer className="h-3.5 w-3.5" />
+                <button onClick={downloadPdf} className={btn}>
+                  <Download className="h-3.5 w-3.5" />
                   PDF
+                </button>
+                <button onClick={() => window.print()} className={btn} title="Print">
+                  <Printer className="h-3.5 w-3.5" />
                 </button>
                 <button onClick={() => remove(active.id)} className="ml-auto rounded-md p-1.5 text-zinc-400 hover:text-rose-600" title="Delete report" aria-label="Delete report">
                   <Trash2 className="h-4 w-4" />
@@ -311,12 +358,12 @@ export function ReportsView() {
                 <header>
                   <h2 className="text-lg font-semibold tracking-tight">Weekly Report</h2>
                   <p className={`text-[13px] ${muted}`}>
-                    {currentUser?.name} · {currentUser?.department} · {formatDate(active.weekStart)} – {formatDate(active.weekEnd)}
+                    {employee?.name ?? currentUser?.name} · {employee?.department ?? currentUser?.department} · {formatDate(active.weekStart)} – {formatDate(active.weekEnd)}
                   </p>
                 </header>
 
                 {snapshot && (
-                  <dl className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+                  <dl className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-8">
                     {[
                       ["Tickets", snapshot.totalTickets],
                       ["Chats", snapshot.totalChats],
@@ -324,6 +371,7 @@ export function ReportsView() {
                       ["Calls", snapshot.totalCalls],
                       ["Emails", snapshot.totalEmails],
                       ["Training", `${snapshot.trainingHours ?? 0}h`],
+                      ...(snapshot.presentDays !== undefined ? [["Present", `${snapshot.presentDays}/${snapshot.workingDays}d`], ["Avg score", `${snapshot.averageScore ?? 0}%`]] : []),
                     ].map(([label, value]) => (
                       <div key={String(label)} className="rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800">
                         <dt className={`text-[11px] ${muted}`}>{label}</dt>

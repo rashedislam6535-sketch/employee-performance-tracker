@@ -50,11 +50,11 @@ You do **not** need to create tables. The app creates them automatically the fir
    | Name | Value |
    |------|-------|
    | `DATABASE_URL` | the Supabase connection string from step 2 |
-   | `OWNER_NAME` | your name, e.g. `Ahsan Habib` |
-   | `OWNER_DEPARTMENT` | e.g. `Customer Support` |
+   | `OWNER_NAME` | your name (optional — can be set later on the Profile page) |
+   | `OWNER_DEPARTMENT` | e.g. `Customer Support` (optional) |
 
 4. Click **Deploy**. After ~1 minute you get a URL like `https://workpulse.vercel.app`.
-5. Open it — the tables and your profile are created on first load. Start logging from **New update**.
+5. Open it — the tables and a blank profile are created on first load. Set your name on **Profile**, then start logging.
 
 Every later `git push` (or file upload on GitHub) redeploys automatically.
 
@@ -63,7 +63,7 @@ Every later `git push` (or file upload on GitHub) redeploys automatically.
 - **Settings → Profile**: change your name/department any time.
 - **Reports → Generate report**: pick *This week / Last week / Last 7 days / This month*, edit the text, then download **Word (.doc)**, **Markdown**, or **PDF** (print dialog → "Save as PDF").
 - **Performance → Export Excel (CSV)**: the monthly sheet for your manager.
-- Want to explore with sample data first? Add `SEED_DEMO_DATA` = `true` **before the first load** of an empty database. Remove the samples later from **Settings → Data → Delete all**.
+- The database starts completely empty — no sample data. **Profile** → set your name and photo, then check in and log your first activity.
 
 ---
 
@@ -109,7 +109,7 @@ npm install
 npm run dev                  # http://localhost:3000
 ```
 
-Tables are created automatically on first load. To apply schema changes after editing `src/db/schema.ts`:
+Tables are created automatically on first load; the database starts empty. To apply schema changes after editing `src/db/schema.ts`:
 
 ```bash
 npx drizzle-kit push --dialect=postgresql --schema=./src/db/schema.ts --url="$DATABASE_URL"
@@ -122,9 +122,8 @@ npx drizzle-kit push --dialect=postgresql --schema=./src/db/schema.ts --url="$DA
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | yes | Postgres connection string. SSL is enabled automatically for remote hosts; append `?sslmode=disable` for Postgres inside a Docker/Coolify network, or `?sslmode=verify-full` for strict certificate checks. |
-| `OWNER_NAME` | no | Name created on first run (default `Ahsan Habib`). Editable in Settings. |
-| `OWNER_DEPARTMENT` | no | Department created on first run (default `Customer Support`). |
-| `SEED_DEMO_DATA` | no | `true` → fill an empty database with sample entries. Default `false`. |
+| `OWNER_NAME` | no | Name pre-filled on first run. Editable on the Profile page. |
+| `OWNER_DEPARTMENT` | no | Department pre-filled on first run. |
 
 `DATABASE_URL` is only needed at runtime, never at build time.
 
@@ -150,7 +149,6 @@ npx drizzle-kit push --dialect=postgresql --schema=./src/db/schema.ts --url="$DA
 | `password authentication failed` | The `[YOUR-PASSWORD]` placeholder wasn't replaced, or the password contains special characters — URL-encode them (`@` → `%40`, `#` → `%23`, `/` → `%2F`). You can reset the password in Supabase → Project Settings → Database. |
 | `The server does not support SSL connections` | Postgres inside Docker/Coolify: append `?sslmode=disable` to `DATABASE_URL`. |
 | Site suddenly errors after a week | Supabase paused the free project — open its dashboard and restore it. |
-| Dashboard shows sample entries | `SEED_DEMO_DATA=true` was set on first load. **Settings → Data → Delete all** removes them; then set the variable to `false`. |
 
 ---
 

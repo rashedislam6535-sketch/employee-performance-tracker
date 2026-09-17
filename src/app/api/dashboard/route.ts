@@ -1,129 +1,100 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { users, dailyUpdates, reports, attendanceCheckIns, notifications } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
-import { ensureSeedData } from "@/db/seed";
-import { addDays, calculateProductivityScore, parseDateStr, toDateStr } from "@/lib/utils";
+import { notifications } from "@/db/schema";
+import { eq, desc } from "drizzle-orm";
+import { resolveEmployee, loadEntries, loadAttendance, sumEntries, groupByDate } from "@/lib/data";
+import {
+  addDays,
+  isWeekend,
+  parseDateStr,
+  previousWorkingDay,
+  productivityScore,
+  startOfWeek,
+  tasksCompleted,
+  toDateStr,
+  weekdayLong,
+  weekdayShort,
+  workingDaysInMonth,
+} from "@/lib/utils";
+import type { DashboardData, DayPoint } from "@/types";
 
-type Agg = {
-  tickets: number;
-  chats: number;
-  kyc: number;
-  calls: number;
-  emails: number;
-  trainingHours: number;
-  count: number;
-};
-
-const emptyAgg = (): Agg => ({ tickets: 0, chats: 0, kyc: 0, calls: 0, emails: 0, trainingHours: 0, count: 0 });
-
-function aggregate(list: (typeof dailyUpdates.$inferSelect)[]): Agg {
-  const a = emptyAgg();
-  for (const u of list) {
-    a.tickets += u.tickets;
-    a.chats += u.chats;
-    a.kyc += u.kyc;
-    a.calls += u.calls;
-    a.emails += u.emails;
-    a.trainingHours += parseFloat(u.trainingHours || "0");
-    a.count += 1;
-  }
-  a.trainingHours = Number(a.trainingHours.toFixed(2));
-  return a;
-}
-
-const publicUser = {
-  id: users.id,
-  name: users.name,
-  email: users.email,
-  role: users.role,
-  department: users.department,
-  avatar: users.avatar,
-  createdAt: users.createdAt,
-};
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await ensureSeedData();
-
     const { searchParams } = new URL(request.url);
-    const userIdParam = searchParams.get("userId");
     const todayParam = searchParams.get("today");
-    const todayStr =
-      todayParam && /^\d{4}-\d{2}-\d{2}$/.test(todayParam) ? todayParam : toDateStr(new Date());
+    const todayStr = todayParam && /^\d{4}-\d{2}-\d{2}$/.test(todayParam) ? todayParam : toDateStr(new Date());
     const today = parseDateStr(todayStr);
 
-    let currentUser = userIdParam
-      ? (await db.select(publicUser).from(users).where(eq(users.id, Number(userIdParam))))[0]
-      : undefined;
-    if (!currentUser) {
-      currentUser = (await db.select(publicUser).from(users).orderBy(users.id).limit(1))[0];
-    }
-    if (!currentUser) {
-      return NextResponse.json({ error: "No user found" }, { status: 404 });
-    }
+    const { user, employee } = await resolveEmployee(searchParams.get("userId"));
+    const [entries, attendanceList] = await Promise.all([loadEntries(user.id, employee.id), loadAttendance(employee.id)]);
+    const byDate = groupByDate(entries);
 
-    const allUpdates = await db
-      .select()
-      .from(dailyUpdates)
-      .where(eq(dailyUpdates.userId, currentUser.id))
-      .orderBy(desc(dailyUpdates.date), desc(dailyUpdates.createdAt));
+    // Today & previous working day
+    const todayList = byDate[todayStr] || [];
+    const todayTotals = sumEntries(todayList);
+    const prevDate = previousWorkingDay(todayStr);
+    const yesterdayStr = toDateStr(addDays(today, -1));
+    const prevList = byDate[prevDate] || [];
+    const prevTotals = sumEntries(prevList);
 
-    const byDate: Record<string, (typeof dailyUpdates.$inferSelect)[]> = {};
-    for (const u of allUpdates) {
-      (byDate[u.date] ||= []).push(u);
-    }
-
-    // Last 14 days, oldest first
-    type DayPoint = Agg & { date: string; total: number; score: number; hasData: boolean };
+    // Last 14 days series
     const series: DayPoint[] = [];
     for (let i = 13; i >= 0; i--) {
       const ds = toDateStr(addDays(today, -i));
       const list = byDate[ds] || [];
-      const agg = aggregate(list);
-      series.push({
-        date: ds,
-        ...agg,
-        total: agg.tickets + agg.chats + agg.kyc + agg.calls + agg.emails,
-        score: list.length ? calculateProductivityScore(agg) : 0,
-        hasData: list.length > 0,
-      });
+      const t = sumEntries(list);
+      series.push({ date: ds, ...t, total: tasksCompleted(t), score: list.length ? productivityScore(t) : 0, hasData: list.length > 0, weekend: isWeekend(ds) });
     }
-    const sumTotal = (arr: typeof series) => arr.reduce((acc, p) => acc + p.total, 0);
-    const weekTotals = { thisWeek: sumTotal(series.slice(7)), lastWeek: sumTotal(series.slice(0, 7)) };
+    const weekTotals = {
+      thisWeek: series.slice(7).reduce((a, p) => a + p.total, 0),
+      lastWeek: series.slice(0, 7).reduce((a, p) => a + p.total, 0),
+    };
 
-    const todayList = byDate[todayStr] || [];
-    const yesterdayList = byDate[toDateStr(addDays(today, -1))] || [];
-    const todayAgg = aggregate(todayList);
-    const yesterdayAgg = aggregate(yesterdayList);
+    // Current week Monday–Friday
+    const monday = startOfWeek(today);
+    const week = Array.from({ length: 5 }, (_, i) => {
+      const ds = toDateStr(addDays(monday, i));
+      const t = sumEntries(byDate[ds] || []);
+      return { date: ds, label: weekdayShort(ds), tickets: t.tickets, chats: t.chats, kyc: t.kyc, calls: t.calls, emails: t.emails };
+    });
 
-    // Calendar month to date
+    // Month to date (working days only for expectations; totals include everything logged)
     const monthPrefix = todayStr.slice(0, 7);
-    const monthUpdates = allUpdates.filter((u) => u.date.startsWith(monthPrefix));
-    const monthAgg = aggregate(monthUpdates);
-    const monthDaysLogged = new Set(monthUpdates.map((u) => u.date)).size;
+    const monthEntries = entries.filter((e) => e.date.startsWith(monthPrefix));
+    const monthTotals = sumEntries(monthEntries);
+    const monthByDate = groupByDate(monthEntries);
+    const wd = workingDaysInMonth(today.getFullYear(), today.getMonth(), today);
+    const monthAttendance = attendanceList.filter((a) => a.date.startsWith(monthPrefix) && a.checkIn && !isWeekend(a.date));
+    const attendanceDays = new Set(monthAttendance.map((a) => a.date)).size;
+    const workingMinutes = attendanceList
+      .filter((a) => a.date.startsWith(monthPrefix) && a.checkIn)
+      .reduce((a, r) => a + (r.status === "checked_out" ? r.workingMinutes : 0), 0);
+    const dayScores = Object.entries(monthByDate)
+      .filter(([ds]) => !isWeekend(ds))
+      .map(([, list]) => productivityScore(sumEntries(list)));
+    const avgScore = dayScores.length ? Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length) : 0;
 
     // Task distribution, last 30 days
     const cutoff = toDateStr(addDays(today, -29));
     const dist: Record<string, number> = {};
-    for (const u of allUpdates) {
-      if (u.date >= cutoff) dist[u.taskType] = (dist[u.taskType] || 0) + 1;
-    }
+    for (const e of entries) if (e.date >= cutoff) dist[e.label] = (dist[e.label] || 0) + 1;
     const taskDistribution = Object.entries(dist)
-      .map(([taskType, count]) => ({ taskType, count }))
+      .map(([label, count]) => ({ label, count }))
       .sort((a, b) => b.count - a.count);
 
-    // Streak of consecutive logged days (weekends don't break it)
+    // Streak of consecutive working days with entries (weekends are skipped, not broken)
     let streak = 0;
     let cursor = todayList.length ? today : addDays(today, -1);
     for (let guard = 0; guard < 400; guard++) {
       const ds = toDateStr(cursor);
+      const dow = cursor.getDay();
       if (byDate[ds]) {
         streak++;
         cursor = addDays(cursor, -1);
         continue;
       }
-      const dow = cursor.getDay();
       if (dow === 0 || dow === 6) {
         cursor = addDays(cursor, -1);
         continue;
@@ -131,41 +102,49 @@ export async function GET(request: Request) {
       break;
     }
 
-    const userReports = await db
-      .select()
-      .from(reports)
-      .where(eq(reports.userId, currentUser.id))
-      .orderBy(desc(reports.createdAt))
-      .limit(5);
-
-    const attendance = await db
-      .select()
-      .from(attendanceCheckIns)
-      .where(and(eq(attendanceCheckIns.userId, currentUser.id), eq(attendanceCheckIns.date, todayStr)))
-      .limit(1);
-
     const userNotifications = await db
       .select()
       .from(notifications)
-      .where(eq(notifications.userId, currentUser.id))
+      .where(eq(notifications.userId, user.id))
       .orderBy(desc(notifications.createdAt))
       .limit(15);
 
-    return NextResponse.json({
-      user: currentUser,
+    const todayAttendance = attendanceList.find((a) => a.date === todayStr) ?? null;
+
+    const payload: DashboardData = {
+      user,
+      employee,
       todayDate: todayStr,
-      today: { ...todayAgg, hasData: todayList.length > 0 },
-      yesterday: { ...yesterdayAgg, hasData: yesterdayList.length > 0 },
+      isWeekend: isWeekend(todayStr),
+      today: { ...todayTotals, hasData: todayList.length > 0, tasksCompleted: tasksCompleted(todayTotals), score: productivityScore(todayTotals) },
+      previous: {
+        ...prevTotals,
+        date: prevDate,
+        label: prevDate === yesterdayStr ? "Yesterday" : weekdayLong(prevDate),
+        hasData: prevList.length > 0,
+      },
       series,
+      week,
       weekTotals,
-      monthTotals: { ...monthAgg, daysLogged: monthDaysLogged },
+      month: {
+        ...monthTotals,
+        label: today.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+        daysLogged: Object.keys(monthByDate).filter((ds) => !isWeekend(ds)).length,
+        workingDaysTotal: wd.total,
+        workingDaysElapsed: wd.elapsed,
+        attendanceDays,
+        attendancePct: wd.elapsed ? Math.min(100, Math.round((attendanceDays / wd.elapsed) * 100)) : 0,
+        workingMinutes,
+        avgScore,
+      },
       taskDistribution,
       streak,
-      recentUpdates: allUpdates.slice(0, 8),
-      reports: userReports,
-      attendance: attendance[0] || null,
-      notifications: userNotifications,
-    });
+      recentEntries: entries.slice(0, 8),
+      attendance: todayAttendance,
+      notifications: userNotifications.map((n) => ({ ...n, createdAt: new Date(n.createdAt).toISOString() })),
+    };
+
+    return NextResponse.json(payload);
   } catch (error: any) {
     console.error("Dashboard API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -4,12 +4,14 @@ import React, { useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { Sidebar, TopBar } from "@/components/Navigation";
 import { DashboardView } from "@/components/DashboardView";
-import { DailyUpdateForm } from "@/components/DailyUpdateForm";
 import { TimelineView } from "@/components/TimelineView";
 import { CalendarView } from "@/components/CalendarView";
 import { PerformanceTrackerView } from "@/components/PerformanceTrackerView";
 import { ReportsView } from "@/components/ReportsView";
 import { SettingsView } from "@/components/SettingsView";
+import { ProfileView } from "@/components/ProfileView";
+import { LogActivityPage } from "@/components/ActivityLogForm";
+import { Toaster, ConfirmDialog } from "@/components/Feedback";
 
 export function MainAppLayout() {
   const { activeTab, currentUser } = useApp();
@@ -35,16 +37,19 @@ export function MainAppLayout() {
           ) : (
             <div key={activeTab} className="fade-in">
               {activeTab === "dashboard" && <DashboardView />}
-              {activeTab === "daily-update" && <DailyUpdateForm />}
+              {activeTab === "daily-update" && <LogActivityPage />}
               {activeTab === "timeline" && <TimelineView />}
               {activeTab === "calendar" && <CalendarView />}
               {activeTab === "performance" && <PerformanceTrackerView />}
               {activeTab === "reports" && <ReportsView />}
+              {activeTab === "profile" && <ProfileView />}
               {activeTab === "settings" && <SettingsView />}
             </div>
           )}
         </main>
       </div>
+      <Toaster />
+      <ConfirmDialog />
     </div>
   );
 }

@@ -133,6 +133,41 @@ export async function POST(request: Request) {
   }
 }
 
+/** PATCH { id, taskType?, description?, tickets?, chats?, kyc?, calls?, emails?, trainingHours?, date? } */
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { id } = body;
+    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    const current = (await db.select().from(dailyUpdates).where(eq(dailyUpdates.id, Number(id))))[0];
+    if (!current) return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+
+    const int = (v: unknown, fallback: number) => (v === undefined ? fallback : Math.max(0, Math.round(Number(v)) || 0));
+    const description = typeof body.description === "string" ? body.description.trim() : current.description;
+    if (!description) return NextResponse.json({ error: "Description is required" }, { status: 400 });
+
+    const [row] = await db
+      .update(dailyUpdates)
+      .set({
+        date: typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : current.date,
+        taskType: typeof body.taskType === "string" && body.taskType.trim() ? body.taskType.trim() : current.taskType,
+        description,
+        tickets: int(body.tickets, current.tickets),
+        chats: int(body.chats, current.chats),
+        kyc: int(body.kyc, current.kyc),
+        calls: int(body.calls, current.calls),
+        emails: int(body.emails, current.emails),
+        trainingHours:
+          body.trainingHours === undefined ? current.trainingHours : Math.max(0, Number(body.trainingHours) || 0).toFixed(2),
+      })
+      .where(eq(dailyUpdates.id, current.id))
+      .returning();
+    return NextResponse.json({ success: true, update: row });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);

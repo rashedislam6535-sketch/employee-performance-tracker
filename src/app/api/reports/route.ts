@@ -1,160 +1,115 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { reports, dailyUpdates, users } from "@/db/schema";
+import { reports } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { addDays, calculateProductivityScore, parseDateStr, toDateStr } from "@/lib/utils";
+import { resolveEmployee, loadEntries, loadAttendance, sumEntries, groupByDate } from "@/lib/data";
+import { addDays, dateKey, formatDuration, isWeekend, parseDateStr, productivityScore, toDateStr, workingDaysBetween } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
-
-    const rows = await db
-      .select({
-        id: reports.id,
-        userId: reports.userId,
-        userName: users.name,
-        department: users.department,
-        weekStart: reports.weekStart,
-        weekEnd: reports.weekEnd,
-        title: reports.title,
-        content: reports.content,
-        keyAchievements: reports.keyAchievements,
-        tasksInProgress: reports.tasksInProgress,
-        nextWeekPlan: reports.nextWeekPlan,
-        metricsSnapshot: reports.metricsSnapshot,
-        createdAt: reports.createdAt,
-      })
-      .from(reports)
-      .leftJoin(users, eq(reports.userId, users.id))
-      .orderBy(desc(reports.createdAt));
-
-    if (userId) {
-      const uId = Number(userId);
-      return NextResponse.json({ reports: rows.filter((r) => r.userId === uId) });
-    }
-    return NextResponse.json({ reports: rows });
+    const rows = await db.select().from(reports).orderBy(desc(reports.createdAt));
+    const list = rows
+      .filter((r) => !userId || r.userId === Number(userId))
+      .map((r) => ({ ...r, weekStart: dateKey(r.weekStart), weekEnd: dateKey(r.weekEnd), createdAt: new Date(r.createdAt).toISOString() }));
+    return NextResponse.json({ reports: list });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
 const IN_PROGRESS_BY_TYPE: Record<string, string> = {
-  "KYC Verification": "Pending KYC submissions awaiting document re-upload from customers",
-  "Customer Support": "Open customer cases waiting on customer replies",
-  HubSpot: "HubSpot contact records still to be updated and tagged",
-  "Ticket Handling": "Escalated tickets awaiting resolution from other teams",
-  "Chat Support": "Follow-ups promised during live chats",
-  "Phone Call": "Scheduled callbacks for customers not reached",
-  Email: "Email threads awaiting customer confirmation",
-  Training: "Training modules not yet completed",
-  Meeting: "Action items from team meetings",
-  Other: "Miscellaneous tasks carried over from this week",
+  kyc: "Pending KYC submissions awaiting document re-upload from customers",
+  support: "Open customer cases waiting on customer replies",
+  hubspot: "HubSpot contact records still to be updated and tagged",
+  ticket: "Tickets still marked Pending / In Progress",
+  chat: "Follow-ups promised during live chats",
+  call: "Scheduled callbacks for customers not reached",
+  email: "Email threads awaiting customer confirmation",
+  training: "Training modules not yet completed",
+  meeting: "Action items from team meetings",
+  other: "Miscellaneous tasks carried over from this week",
 };
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { userId, weekStart, weekEnd } = body;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-    }
-
-    const targetUser = (await db.select().from(users).where(eq(users.id, Number(userId))))[0];
-    if (!targetUser) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
+    const { user, employee } = await resolveEmployee(userId);
 
     const isDate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
     const end = isDate(weekEnd) ? weekEnd : toDateStr(new Date());
     const start = isDate(weekStart) ? weekStart : toDateStr(addDays(parseDateStr(end), -6));
 
-    const userUpdates = await db.select().from(dailyUpdates).where(eq(dailyUpdates.userId, targetUser.id));
-    const weekUpdates = userUpdates.filter((u) => u.date >= start && u.date <= end);
-
-    let tickets = 0,
-      chats = 0,
-      kyc = 0,
-      calls = 0,
-      emails = 0,
-      trainingHours = 0;
-    const typeCounts: Record<string, number> = {};
-    const byDate: Record<string, typeof weekUpdates> = {};
-
-    for (const u of weekUpdates) {
-      tickets += u.tickets;
-      chats += u.chats;
-      kyc += u.kyc;
-      calls += u.calls;
-      emails += u.emails;
-      trainingHours += parseFloat(u.trainingHours || "0");
-      typeCounts[u.taskType] = (typeCounts[u.taskType] || 0) + 1;
-      (byDate[u.date] ||= []).push(u);
-    }
-
+    const [entries, attendanceList] = await Promise.all([loadEntries(user.id, employee.id), loadAttendance(employee.id)]);
+    const periodEntries = entries.filter((e) => e.date >= start && e.date <= end);
+    const totals = sumEntries(periodEntries);
+    const byDate = groupByDate(periodEntries);
     const daysLogged = Object.keys(byDate).length;
-    const dailyScores = Object.values(byDate).map((list) =>
-      calculateProductivityScore({
-        tickets: list.reduce((a, b) => a + b.tickets, 0),
-        chats: list.reduce((a, b) => a + b.chats, 0),
-        kyc: list.reduce((a, b) => a + b.kyc, 0),
-        calls: list.reduce((a, b) => a + b.calls, 0),
-        emails: list.reduce((a, b) => a + b.emails, 0),
-        trainingHours: list.reduce((a, b) => a + parseFloat(b.trainingHours || "0"), 0),
-      })
-    );
-    const avgScore = dailyScores.length
-      ? Math.round(dailyScores.reduce((a, b) => a + b, 0) / dailyScores.length)
-      : 0;
+    const workingDays = workingDaysBetween(parseDateStr(start), parseDateStr(end));
 
-    const topTypes = Object.entries(typeCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([t]) => t);
+    const dayScores = Object.entries(byDate)
+      .filter(([ds]) => !isWeekend(ds))
+      .map(([, list]) => productivityScore(sumEntries(list)));
+    const avgScore = dayScores.length ? Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length) : 0;
 
-    // Key achievements — only what actually happened
+    const periodAttendance = attendanceList.filter((a) => a.date >= start && a.date <= end && a.checkIn);
+    const presentDays = new Set(periodAttendance.filter((a) => !isWeekend(a.date)).map((a) => a.date)).size;
+    const workedMinutes = periodAttendance.reduce((a, r) => a + (r.status === "checked_out" ? r.workingMinutes : 0), 0);
+
+    const typeCounts: Record<string, number> = {};
+    for (const e of periodEntries) typeCounts[e.type] = (typeCounts[e.type] || 0) + 1;
+    const topTypes = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([t]) => t);
+
+    const openTickets = periodEntries.filter((e) => e.type === "ticket" && e.status && e.status !== "Resolved").length;
+    const kycCountries = Array.from(new Set(periodEntries.filter((e) => e.type === "kyc" && e.country).map((e) => e.country as string)));
+
     const achievements: string[] = [];
-    if (kyc > 0) achievements.push(`Completed ${kyc} KYC verifications`);
-    if (chats > 0) achievements.push(`Assisted ${chats} customers over live chat`);
-    if (tickets > 0) achievements.push(`Resolved ${tickets} support tickets`);
-    if (calls > 0) achievements.push(`Handled ${calls} customer phone calls`);
-    if (emails > 0) achievements.push(`Answered ${emails} customer emails`);
-    if (trainingHours > 0) achievements.push(`Completed ${trainingHours.toFixed(1)} hours of training`);
-    if (daysLogged > 0) achievements.push(`Logged work on ${daysLogged} day${daysLogged === 1 ? "" : "s"} this period`);
+    if (totals.kyc > 0) achievements.push(`Completed ${totals.kyc} KYC verifications${kycCountries.length ? ` (${kycCountries.join(", ")})` : ""}`);
+    if (totals.chats > 0) achievements.push(`Assisted ${totals.chats} customers over live chat`);
+    if (totals.tickets > 0) achievements.push(`Handled ${totals.tickets} support tickets${openTickets ? ` (${openTickets} still open)` : ""}`);
+    if (totals.calls > 0) achievements.push(`Handled ${totals.calls} customer phone calls`);
+    if (totals.emails > 0) achievements.push(`Answered ${totals.emails} customer emails`);
+    if (totals.trainingHours > 0) achievements.push(`Completed ${totals.trainingHours.toFixed(1)} hours of training`);
+    if (presentDays > 0) achievements.push(`Present ${presentDays} of ${workingDays} working days${workedMinutes ? `, ${formatDuration(workedMinutes)} worked` : ""}`);
     if (achievements.length === 0) achievements.push("No work updates were logged for this period");
 
-    const inProgress = (topTypes.length ? topTypes : ["Other"])
-      .slice(0, 4)
-      .map((t) => IN_PROGRESS_BY_TYPE[t] || IN_PROGRESS_BY_TYPE.Other);
+    const inProgress = (topTypes.length ? topTypes : ["other"]).slice(0, 4).map((t) => IN_PROGRESS_BY_TYPE[t] || IN_PROGRESS_BY_TYPE.other);
 
     const perDay = (v: number) => (daysLogged ? Math.max(1, Math.round(v / daysLogged)) : 0);
     const plan: string[] = [];
-    if (kyc > 0) plan.push(`Keep KYC verifications at ${perDay(kyc)}+ per day with no backlog`);
-    if (tickets > 0) plan.push(`Close ${perDay(tickets)}+ tickets per day within SLA`);
-    if (chats > 0) plan.push(`Maintain ${perDay(chats)}+ chat resolutions per day`);
-    if (calls > 0) plan.push(`Complete all scheduled callbacks (${perDay(calls)}+ calls per day)`);
-    if (trainingHours === 0) plan.push("Schedule at least 1 hour of training");
+    if (totals.kyc > 0) plan.push(`Keep KYC verifications at ${perDay(totals.kyc)}+ per day with no backlog`);
+    if (totals.tickets > 0) plan.push(`Close ${perDay(totals.tickets)}+ tickets per day within SLA${openTickets ? ` and resolve the ${openTickets} open ticket${openTickets === 1 ? "" : "s"}` : ""}`);
+    if (totals.chats > 0) plan.push(`Maintain ${perDay(totals.chats)}+ chat resolutions per day`);
+    if (totals.calls > 0) plan.push(`Complete all scheduled callbacks (${perDay(totals.calls)}+ calls per day)`);
+    if (totals.trainingHours === 0) plan.push("Schedule at least 1 hour of training");
     plan.push("Log a work update every working day");
 
-    const focus = topTypes.length ? topTypes.slice(0, 3).join(", ") : "no recorded task types";
-    const content = `${targetUser.name} logged ${weekUpdates.length} update${weekUpdates.length === 1 ? "" : "s"} across ${daysLogged} day${daysLogged === 1 ? "" : "s"} between ${start} and ${end}. Main areas of work: ${focus}. Average daily productivity score: ${avgScore}%.`;
+    const focus = topTypes.length ? topTypes.slice(0, 3).map((t) => periodEntries.find((e) => e.type === t)?.label ?? t).join(", ") : "no recorded task types";
+    const content = `${employee.name} logged ${periodEntries.length} update${periodEntries.length === 1 ? "" : "s"} across ${daysLogged} day${daysLogged === 1 ? "" : "s"} between ${start} and ${end} (${workingDays} working days). Main areas of work: ${focus}. Average daily productivity score: ${avgScore}%.`;
 
     const metricsSnapshot = JSON.stringify({
-      totalTickets: tickets,
-      totalChats: chats,
-      totalKyc: kyc,
-      totalCalls: calls,
-      totalEmails: emails,
-      trainingHours: Number(trainingHours.toFixed(1)),
-      updatesLogged: weekUpdates.length,
+      totalTickets: totals.tickets,
+      totalChats: totals.chats,
+      totalKyc: totals.kyc,
+      totalCalls: totals.calls,
+      totalEmails: totals.emails,
+      trainingHours: Number(totals.trainingHours.toFixed(1)),
+      updatesLogged: periodEntries.length,
       daysLogged,
+      workingDays,
+      presentDays,
+      workedMinutes,
       averageScore: avgScore,
     });
 
-    const newReport = await db
+    const [newReport] = await db
       .insert(reports)
       .values({
-        userId: targetUser.id,
+        userId: user.id,
         weekStart: start,
         weekEnd: end,
         title: `Weekly report · ${start} to ${end}`,
@@ -166,7 +121,10 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    return NextResponse.json({ success: true, report: newReport[0] });
+    return NextResponse.json({
+      success: true,
+      report: { ...newReport, weekStart: dateKey(newReport.weekStart), weekEnd: dateKey(newReport.weekEnd), createdAt: new Date(newReport.createdAt).toISOString() },
+    });
   } catch (error: any) {
     console.error("Report POST Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -178,8 +136,7 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const { id, keyAchievements, tasksInProgress, nextWeekPlan, content } = body;
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-
-    const updated = await db
+    const [updated] = await db
       .update(reports)
       .set({
         ...(keyAchievements !== undefined ? { keyAchievements } : {}),
@@ -189,8 +146,7 @@ export async function PATCH(request: Request) {
       })
       .where(eq(reports.id, Number(id)))
       .returning();
-
-    return NextResponse.json({ success: true, report: updated[0] });
+    return NextResponse.json({ success: true, report: updated });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

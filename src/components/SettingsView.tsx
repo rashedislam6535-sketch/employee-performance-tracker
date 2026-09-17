@@ -13,23 +13,16 @@ const btn =
   "inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[13px] font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800";
 
 export function SettingsView() {
-  const { currentUser, setCurrentUser, theme, setTheme, notifyDataChanged } = useApp();
+  const { currentUser, setCurrentUser, theme, setTheme, notifyDataChanged, toast, confirm, setActiveTab, employee } = useApp();
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     setName(currentUser?.name ?? "");
     setDepartment(currentUser?.department ?? "");
   }, [currentUser?.id, currentUser?.name, currentUser?.department]);
-
-  useEffect(() => {
-    if (!message) return;
-    const t = setTimeout(() => setMessage(""), 2500);
-    return () => clearTimeout(t);
-  }, [message]);
 
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,9 +37,10 @@ export function SettingsView() {
       const json = await res.json();
       if (res.ok && json.user) {
         setCurrentUser(json.user);
-        setMessage("Profile saved");
+        notifyDataChanged();
+        toast({ title: "Profile saved", variant: "success" });
       } else {
-        setMessage(json.error || "Could not save");
+        toast({ title: json.error || "Could not save", variant: "error" });
       }
     } finally {
       setSaving(false);
@@ -55,16 +49,17 @@ export function SettingsView() {
 
   const exportAll = async () => {
     if (!currentUser) return;
-    const res = await fetch(`/api/updates?userId=${currentUser.id}`);
+    const res = await fetch(`/api/entries?userId=${currentUser.id}`);
     if (!res.ok) return;
     const data = await res.json();
-    const rows = (data.updates || []).map((u: any) => ({ ...u, trainingHours: num(u.trainingHours) }));
+    const rows = (data.entries || []).map((u: any) => ({ ...u, taskType: u.label, trainingHours: num(u.trainingHours), details: [u.country, u.accountId && `MT ${u.accountId}`, u.ticketCategory, u.priority, u.status].filter(Boolean).join(" · ") }));
     downloadFile(
       "work-log-all.csv",
       toCsv(rows, [
         { key: "date", label: "Date" },
-        { key: "taskType", label: "Task type" },
+        { key: "taskType", label: "Activity" },
         { key: "description", label: "Description" },
+        { key: "details", label: "Details" },
         { key: "tickets", label: "Tickets" },
         { key: "chats", label: "Chats" },
         { key: "kyc", label: "KYC" },
@@ -78,13 +73,18 @@ export function SettingsView() {
 
   const clearDraft = () => {
     localStorage.removeItem("workpulse_update_draft");
-    setMessage("Draft cleared");
+    toast({ title: "Draft cleared" });
   };
 
   const deleteAll = async () => {
     if (!currentUser) return;
-    if (!confirm("Delete ALL entries, reports and check-ins? This cannot be undone.")) return;
-    if (!confirm("Last check — really delete everything?")) return;
+    const ok = await confirm({
+      title: "Delete all entries?",
+      description: "Every activity, daily summary, attendance record and report will be removed. Your profile is kept. This cannot be undone.",
+      confirmText: "Delete everything",
+      destructive: true,
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       const res = await fetch("/api/reset", {
@@ -94,9 +94,9 @@ export function SettingsView() {
       });
       if (res.ok) {
         notifyDataChanged();
-        setMessage("All entries deleted");
+        toast({ title: "All entries deleted", variant: "success" });
       } else {
-        setMessage("Could not delete entries");
+        toast({ title: "Could not delete entries", variant: "error" });
       }
     } finally {
       setDeleting(false);
@@ -113,7 +113,13 @@ export function SettingsView() {
       <form onSubmit={saveProfile} className={card}>
         <div className="border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
           <h3 className="text-[13px] font-medium">Profile</h3>
-          <p className={`text-xs ${muted}`}>Shown on reports and exports.</p>
+          <p className={`text-xs ${muted}`}>
+            Quick edit. Photo, personal details and availability are on the{" "}
+            <button type="button" onClick={() => setActiveTab("profile")} className="text-indigo-600 hover:underline dark:text-indigo-400">
+              Profile page
+            </button>
+            .
+          </p>
         </div>
         <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
           <div>
@@ -126,7 +132,7 @@ export function SettingsView() {
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
-          <span className={`text-xs ${muted}`}>{message}</span>
+          <span className={`text-xs ${muted}`}>{employee?.employeeCode ? `Employee ID ${employee.employeeCode}` : ""}</span>
           <button type="submit" disabled={saving} className="inline-flex h-8 items-center rounded-md bg-indigo-600 px-3 text-[13px] font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
             {saving ? "Saving…" : "Save"}
           </button>
@@ -179,7 +185,7 @@ export function SettingsView() {
           <div className="flex items-center justify-between px-5 py-4">
             <div>
               <p className="text-[13px]">Delete all entries</p>
-              <p className={`text-xs ${muted}`}>Removes every update, report and check-in. Use this to clear sample data. Cannot be undone.</p>
+              <p className={`text-xs ${muted}`}>Removes every activity, daily summary, attendance record and report. Your profile is kept. Cannot be undone.</p>
             </div>
             <button
               onClick={deleteAll}

@@ -17,7 +17,9 @@ import {
   Menu,
   X,
   Plus,
+  UserCircle,
 } from "lucide-react";
+import { availabilityMeta } from "@/lib/utils";
 
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -35,10 +37,14 @@ export const PAGE_TITLES: Record<string, string> = {
   calendar: "Calendar",
   performance: "Monthly performance",
   reports: "Weekly reports",
+  profile: "Employee profile",
   settings: "Settings",
 };
 
-export function Avatar({ name, className = "h-8 w-8 text-xs" }: { name?: string | null; className?: string }) {
+export function Avatar({ name, photo, className = "h-8 w-8 text-xs" }: { name?: string | null; photo?: string | null; className?: string }) {
+  if (photo) {
+    return <img src={photo} alt={name || "Profile photo"} className={`shrink-0 rounded-full object-cover ${className}`} />;
+  }
   const initials = (name || "?")
     .split(" ")
     .filter(Boolean)
@@ -56,7 +62,8 @@ export function Avatar({ name, className = "h-8 w-8 text-xs" }: { name?: string 
 }
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { currentUser, activeTab, setActiveTab, theme, toggleTheme } = useApp();
+  const { currentUser, employee, activeTab, setActiveTab, theme, toggleTheme } = useApp();
+  const avail = availabilityMeta(employee?.availability);
 
   const go = (id: string) => {
     setActiveTab(id);
@@ -115,19 +122,28 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             <p className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
               Account
             </p>
-            <button onClick={() => go("settings")} className={itemCls(activeTab === "settings")}>
-              <Settings className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-              <span>Settings</span>
-            </button>
+            <div className="space-y-0.5">
+              <button onClick={() => go("profile")} className={itemCls(activeTab === "profile")}>
+                <UserCircle className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                <span>Profile</span>
+              </button>
+              <button onClick={() => go("settings")} className={itemCls(activeTab === "settings")}>
+                <Settings className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                <span>Settings</span>
+              </button>
+            </div>
           </div>
         </nav>
 
         <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
           <div className="flex items-center gap-2.5">
-            <Avatar name={currentUser?.name} />
+            <button onClick={() => go("profile")} className="relative shrink-0 rounded-full" title="Open profile">
+              <Avatar name={employee?.name ?? currentUser?.name} photo={employee?.photo} />
+              <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-zinc-100 dark:ring-zinc-950 ${avail.dot}`} title={avail.label} />
+            </button>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium">{currentUser?.name ?? "—"}</p>
-              <p className="truncate text-[11px] text-zinc-500">{currentUser?.department ?? ""}</p>
+              <p className="truncate text-[13px] font-medium">{employee?.name ?? currentUser?.name ?? "—"}</p>
+              <p className="truncate text-[11px] text-zinc-500">{employee?.designation || employee?.department || currentUser?.department || avail.label}</p>
             </div>
             <button
               onClick={toggleTheme}
@@ -223,7 +239,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
               </div>
               <div className="max-h-80 overflow-y-auto">
                 {notifications.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-xs text-zinc-500">You're all caught up.</p>
+                  <p className="px-3 py-6 text-center text-xs text-zinc-500">You&apos;re all caught up.</p>
                 ) : (
                   notifications.map((n) => (
                     <button

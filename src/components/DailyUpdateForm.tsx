@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { TASK_TYPES, toDateStr } from "@/lib/utils";
-import { Paperclip, X, Check } from "lucide-react";
+import { Paperclip, X } from "lucide-react";
 
 const DRAFT_KEY = "workpulse_update_draft";
 
@@ -23,8 +23,8 @@ const METRIC_FIELDS: { key: keyof Metrics; label: string; step?: string; placeho
   { key: "trainingHours", label: "Training hours", step: "0.5", placeholder: "0.0" },
 ];
 
-export function DailyUpdateForm() {
-  const { currentUser, notifyDataChanged, setActiveTab } = useApp();
+export function DailyUpdateForm({ embedded = false }: { embedded?: boolean }) {
+  const { currentUser, notifyDataChanged, toast } = useApp();
 
   const [date, setDate] = useState(toDateStr(new Date()));
   const [taskType, setTaskType] = useState(TASK_TYPES[0]);
@@ -34,7 +34,6 @@ export function DailyUpdateForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [draftState, setDraftState] = useState<"none" | "restored" | "saved">("none");
-  const [toast, setToast] = useState<string | null>(null);
   const hydrated = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -68,12 +67,6 @@ export function DailyUpdateForm() {
     }, 600);
     return () => clearTimeout(t);
   }, [taskType, description, metrics]);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   const setMetric = (key: keyof Metrics, value: string) => setMetrics((m) => ({ ...m, [key]: value }));
 
@@ -120,7 +113,7 @@ export function DailyUpdateForm() {
       }
       reset();
       notifyDataChanged();
-      setToast("Update saved");
+      toast({ title: "Daily summary saved", description: `${taskType} · ${date}`, variant: "success" });
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
     } finally {
@@ -129,14 +122,18 @@ export function DailyUpdateForm() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-5 flex items-end justify-between">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">New work update</h2>
-          <p className="mt-0.5 text-[13px] text-zinc-500 dark:text-zinc-400">
-            Log one entry per task type. You can add several entries for the same day.
-          </p>
-        </div>
+    <div className={embedded ? "" : "mx-auto max-w-3xl"}>
+      <div className="mb-3 flex items-end justify-between">
+        {!embedded ? (
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">New work update</h2>
+            <p className="mt-0.5 text-[13px] text-zinc-500 dark:text-zinc-400">
+              Log one entry per task type. You can add several entries for the same day.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">One entry with the day&apos;s totals per task type.</p>
+        )}
         <span className="text-xs text-zinc-400">
           {draftState === "saved" && "Draft saved"}
           {draftState === "restored" && "Draft restored"}
@@ -257,17 +254,6 @@ export function DailyUpdateForm() {
         </div>
       </form>
 
-      {toast && (
-        <div className="toast-in fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
-            <Check className="h-3 w-3" />
-          </span>
-          <span className="text-[13px] font-medium">{toast}</span>
-          <button onClick={() => setActiveTab("timeline")} className="text-[13px] text-indigo-600 hover:underline dark:text-indigo-400">
-            View timeline
-          </button>
-        </div>
-      )}
     </div>
   );
 }

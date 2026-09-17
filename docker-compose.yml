@@ -24,9 +24,8 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://workpulse:change-this-password@db:5432/workpulse?sslmode=disable
-      OWNER_NAME: Ahsan Habib
-      OWNER_DEPARTMENT: Customer Support
-      SEED_DEMO_DATA: "false"
+      OWNER_NAME: ""
+      OWNER_DEPARTMENT: ""
     depends_on:
       db:
         condition: service_healthy
