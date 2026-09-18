@@ -31,7 +31,16 @@ const globalForStore = globalThis as typeof globalThis & {
   __workpulseStore?: MemoryStore;
 };
 
-const DISK_FILE = path.join(process.cwd(), ".workpulse-local-data.json");
+const isServerless = Boolean(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT ||
+  (process.env.NODE_ENV === "production" && process.platform !== "win32")
+);
+
+const DISK_FILE = isServerless
+  ? path.join("/tmp", ".workpulse-local-data.json")
+  : path.join(process.cwd(), ".workpulse-local-data.json");
 
 function loadFromDisk(): MemoryStore | null {
   try {
@@ -40,7 +49,7 @@ function loadFromDisk(): MemoryStore | null {
       return JSON.parse(raw);
     }
   } catch (e) {
-    console.warn("Failed to load local store file:", e);
+    // Non-fatal fallback for read-only serverless sandboxes
   }
   return null;
 }
@@ -50,7 +59,7 @@ export function saveToDisk(store?: MemoryStore) {
     const s = store || getMemoryStore();
     fs.writeFileSync(DISK_FILE, JSON.stringify(s, null, 2), "utf8");
   } catch (e) {
-    console.warn("Failed to save local store file:", e);
+    // Gracefully handle read-only filesystems in serverless execution environments
   }
 }
 
