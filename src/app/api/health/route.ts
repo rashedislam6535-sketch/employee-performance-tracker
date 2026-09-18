@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { getMemoryStore } from "@/lib/dataStore";
@@ -19,7 +20,7 @@ export async function GET() {
     }
   }
 
-  return Response.json({
+  return NextResponse.json({
     ok: true,
     status: dbStatus === "connected" ? "healthy" : "degraded_local_fallback",
     database: {

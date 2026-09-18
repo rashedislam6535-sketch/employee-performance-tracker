@@ -10,8 +10,8 @@ const statements = rawSql
   .map((s) => s.trim())
   .filter(Boolean);
 
-const PROJECT_REF = 'udkvkxaiduugqgnesxjp';
-const POOLER_HOST = 'aws-0-us-east-1.pooler.supabase.com';
+const PROJECT_REF = process.env.SUPABASE_PROJECT_REF || 'mkmrifjcczeohsppqhni';
+const POOLER_HOST = process.env.SUPABASE_POOLER_HOST || 'aws-0-ap-northeast-1.pooler.supabase.com';
 
 function updateEnvFile(password) {
   const envPath = path.join(__dirname, '.env');
