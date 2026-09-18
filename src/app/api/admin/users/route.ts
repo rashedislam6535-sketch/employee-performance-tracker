@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMemoryStore } from "@/lib/dataStore";
+import { getMemoryStore, saveToDisk } from "@/lib/dataStore";
 import type { User, EmployeeProfile } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,9 @@ export async function GET() {
       const emp = store.employees.find((e) => e.userId === u.id);
       const userActs = store.activities.filter((a) => a.employeeId === (emp?.id || u.id));
       const todayActs = userActs.filter((a) => a.date === todayStr);
-      const att = store.attendance.find((a) => a.date === todayStr);
+      const att = store.attendance.find(
+        (a) => (a.employeeId === (emp?.id || u.id) || a.userId === u.id) && a.date === todayStr
+      );
 
       const totalTasks = userActs.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
 
@@ -65,6 +67,7 @@ export async function PATCH(request: Request) {
       if (designation) store.employees[empIndex].designation = designation;
       if (availability) store.employees[empIndex].availability = availability;
     }
+    saveToDisk(store);
 
     return NextResponse.json({
       success: true,
@@ -101,6 +104,7 @@ export async function DELETE(request: Request) {
     store.users = store.users.filter((u) => u.id !== userId);
     store.employees = store.employees.filter((e) => e.userId !== userId);
     store.activities = store.activities.filter((a) => a.employeeId !== userId);
+    saveToDisk(store);
 
     return NextResponse.json({ success: true, message: "User removed successfully." });
   } catch (err: any) {

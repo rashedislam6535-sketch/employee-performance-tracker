@@ -47,7 +47,7 @@ function poolConfig(raw: string): PoolConfig {
     ssl,
     max: isLocal ? 10 : 5, // keep the pool small on serverless hosts
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 3_000,
   };
 }
 

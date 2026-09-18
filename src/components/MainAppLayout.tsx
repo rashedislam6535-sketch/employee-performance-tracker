@@ -66,6 +66,27 @@ export function MainAppLayout() {
             {activeTab === "settings" && <SettingsView />}
           </div>
         </main>
+
+        <footer className="mt-auto border-t border-zinc-200 dark:border-zinc-800/80 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-sm py-4 px-4 sm:px-8">
+          <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200">WorkPulse</span>
+              <span>·</span>
+              <span>Enterprise Performance Suite v2.5</span>
+              <span className="hidden sm:inline">·</span>
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Operational
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span>Powered by</span>
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                Rashed Islam
+              </span>
+            </div>
+          </div>
+        </footer>
       </div>
       <Toaster />
       <ConfirmDialog />

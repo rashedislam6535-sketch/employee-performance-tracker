@@ -4,7 +4,7 @@ import { activities } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveEmployee } from "@/lib/data";
 import { ACTIVITY_TYPES, KYC_COUNTRIES, PRIORITIES, TICKET_CATEGORIES, TICKET_STATUSES, toDateStr } from "@/lib/utils";
-import { getMemoryStore } from "@/lib/dataStore";
+import { getMemoryStore, saveToDisk } from "@/lib/dataStore";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +117,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
     store.activities.unshift(newAct);
+    saveToDisk(store);
 
     return NextResponse.json({ success: true, activity: newAct });
   } catch (error: any) {
@@ -130,6 +131,29 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as Payload & { id?: number };
     if (!body.id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
+    if (process.env.DATABASE_URL) {
+      try {
+        const updateValues: Record<string, unknown> = {};
+        if (body.type) updateValues.type = body.type;
+        if (body.quantity !== undefined) updateValues.quantity = String(body.quantity);
+        if (body.country !== undefined) updateValues.country = body.country;
+        if (body.accountId !== undefined) updateValues.accountId = body.accountId;
+        if (body.ticketCategory !== undefined) updateValues.ticketCategory = body.ticketCategory;
+        if (body.priority !== undefined) updateValues.priority = body.priority;
+        if (body.status !== undefined) updateValues.status = body.status;
+        if (body.description !== undefined) updateValues.description = body.description;
+
+        const [row] = await db
+          .update(activities)
+          .set(updateValues)
+          .where(eq(activities.id, Number(body.id)))
+          .returning();
+        if (row) return NextResponse.json({ success: true, activity: row });
+      } catch (dbErr) {
+        console.warn("Activities DB PATCH bypassed, utilizing active data store.");
+      }
+    }
+
     const store = getMemoryStore();
     const act = store.activities.find((a) => a.id === Number(body.id));
     if (act) {
@@ -141,6 +165,7 @@ export async function PATCH(request: Request) {
       if (body.priority !== undefined) act.priority = body.priority;
       if (body.status !== undefined) act.status = body.status;
       if (body.description !== undefined) act.description = body.description || "";
+      saveToDisk(store);
       return NextResponse.json({ success: true, activity: act });
     }
 
@@ -156,8 +181,18 @@ export async function DELETE(request: Request) {
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
+    if (process.env.DATABASE_URL) {
+      try {
+        await db.delete(activities).where(eq(activities.id, Number(id)));
+        return NextResponse.json({ success: true });
+      } catch (dbErr) {
+        console.warn("Activities DB DELETE bypassed, utilizing active data store.");
+      }
+    }
+
     const store = getMemoryStore();
     store.activities = store.activities.filter((a) => a.id !== Number(id));
+    saveToDisk(store);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

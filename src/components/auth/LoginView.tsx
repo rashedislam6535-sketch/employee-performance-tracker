@@ -41,6 +41,7 @@ export function LoginView() {
   const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [regDepartment, setRegDepartment] = useState("Customer Support");
   const [regDesignation, setRegDesignation] = useState("");
+  const [regRole, setRegRole] = useState<"admin" | "employee" | "manager">("employee");
   const [regLoading, setRegLoading] = useState(false);
   const [showRegPass, setShowRegPass] = useState(false);
 
@@ -119,6 +120,7 @@ export function LoginView() {
           password: regPassword,
           department: regDepartment,
           designation: regDesignation,
+          role: regRole,
         }),
       });
 
@@ -354,11 +356,14 @@ export function LoginView() {
               </button>
             </form>
 
-            {/* Register Trigger */}
+              {/* Register Trigger */}
             <div className="mt-6 pt-5 border-t border-zinc-800/80 text-center">
               <button
                 type="button"
-                onClick={() => setShowRegister(true)}
+                onClick={() => {
+                  setRegRole(activePortal === "admin" ? "admin" : "employee");
+                  setShowRegister(true);
+                }}
                 className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition"
               >
                 <UserPlus className="h-3.5 w-3.5 text-indigo-400" />
@@ -378,8 +383,15 @@ export function LoginView() {
           <span>·</span>
           <span className="text-emerald-500 font-medium">All Systems Operational</span>
         </div>
-        <div>
-          <span>Enterprise Role-Based Access Control Enabled</span>
+        <div className="flex items-center gap-3">
+          <span className="hidden md:inline text-zinc-500">Enterprise Role-Based Access Control Enabled</span>
+          <span className="hidden md:inline text-zinc-600">·</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-zinc-500">Powered by</span>
+            <span className="font-semibold text-zinc-200 hover:text-indigo-400 transition-colors">
+              Rashed Islam
+            </span>
+          </div>
         </div>
       </footer>
 
@@ -412,34 +424,25 @@ export function LoginView() {
             <div className="mt-4 rounded-lg border border-indigo-500/20 bg-indigo-950/30 px-3 py-2.5 text-xs text-indigo-300 flex items-start gap-2">
               <Sparkles className="h-3.5 w-3.5 mt-0.5 text-indigo-400 shrink-0" />
               <span>
-                Your role is assigned automatically. The first person to register becomes the <strong>Administrator</strong>. All subsequent accounts start as <strong>Employee</strong> and can be promoted by the admin.
+                {regRole === "admin"
+                  ? "Creating an Administrator account provides full system access, employee management, and attendance controls."
+                  : "Creating an Employee account enables personal dashboard check-ins, performance logging, and daily reports."}
               </span>
             </div>
 
             <form onSubmit={handleRegisterSubmit} className="mt-4 space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">Full Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={regName}
-                  onChange={(e) => setRegName(e.target.value)}
-                  placeholder="e.g. Rajesh Kumar"
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">Work Email *</label>
-                  <input
-                    type="email"
-                    required
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="you@company.io"
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
-                  />
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">Account Role *</label>
+                  <select
+                    value={regRole}
+                    onChange={(e) => setRegRole(e.target.value as "admin" | "employee" | "manager")}
+                    className="w-full rounded-lg border border-indigo-500/40 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 font-medium outline-none focus:border-indigo-500 transition"
+                  >
+                    <option value="admin">Administrator (Full Access)</option>
+                    <option value="employee">Employee (Workspace & Logs)</option>
+                    <option value="manager">Manager (Team Operations)</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-zinc-300 mb-1">Department</label>
@@ -455,6 +458,30 @@ export function LoginView() {
                     <option value="Operations & Leadership">Operations & Leadership</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={regName}
+                  onChange={(e) => setRegName(e.target.value)}
+                  placeholder="e.g. Rajesh Kumar"
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">Work Email *</label>
+                <input
+                  type="email"
+                  required
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  placeholder="you@company.io"
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-indigo-500 transition"
+                />
               </div>
 
               <div>

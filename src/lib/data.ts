@@ -87,9 +87,36 @@ export async function resolveEmployee(userIdParam?: string | number | null): Pro
     }
   }
 
-  // Fallback to default user in memory store
-  const defaultUser = store.users[1] || store.users[0];
-  const defaultEmp = store.employees.find((e) => e.userId === defaultUser.id) || store.employees[0];
+  // Fallback to default user in memory store or safe guest placeholder
+  const fallbackUser: User = {
+    id: 0,
+    name: "Guest",
+    email: "guest@workpulse.local",
+    role: "employee",
+    department: "General",
+    avatar: null,
+  };
+  const fallbackEmp: EmployeeProfile = {
+    id: 0,
+    userId: 0,
+    name: "Guest",
+    nickname: "Guest",
+    photo: null,
+    dob: null,
+    phone: null,
+    bloodGroup: null,
+    email: "guest@workpulse.local",
+    department: "General",
+    designation: "Guest",
+    employeeCode: "EMP-0000",
+    availability: "available",
+  };
+
+  const defaultUser = store.users.length > 0 ? (store.users[1] || store.users[0]) : fallbackUser;
+  const defaultEmp =
+    (defaultUser.id !== 0 && store.employees.find((e) => e.userId === defaultUser.id)) ||
+    store.employees[0] ||
+    fallbackEmp;
   return { user: defaultUser, employee: defaultEmp };
 }
 
@@ -174,7 +201,37 @@ export async function loadEntries(userId: number, employeeId: number): Promise<E
 
   // Memory store fallback
   const userActs = store.activities.filter((a) => a.employeeId === employeeId || a.employeeId === userId);
-  const list: Entry[] = userActs.map((a) => {
+  const userUpdates = (store.dailyUpdates || []).filter((u) => u.userId === userId);
+
+  const list: Entry[] = [];
+
+  for (const u of userUpdates) {
+    list.push({
+      id: `update-${u.id}`,
+      source: "update",
+      rawId: u.id,
+      date: dateKey(u.date),
+      type: taskTypeToActivityType(u.taskType),
+      label: u.taskType,
+      description: u.description,
+      tickets: num(u.tickets),
+      chats: num(u.chats),
+      kyc: num(u.kyc),
+      calls: num(u.calls),
+      emails: num(u.emails),
+      trainingHours: num(u.trainingHours),
+      quantity: null,
+      country: null,
+      accountId: null,
+      ticketCategory: null,
+      priority: null,
+      status: null,
+      attachmentName: u.attachmentName ?? null,
+      createdAt: u.createdAt || new Date().toISOString(),
+    });
+  }
+
+  for (const a of userActs) {
     const qty = num(a.quantity);
     const t = emptyTotals();
     if (a.type === "kyc") t.kyc = qty;
@@ -184,7 +241,7 @@ export async function loadEntries(userId: number, employeeId: number): Promise<E
     else if (a.type === "email") t.emails = qty;
     else if (a.type === "training") t.trainingHours = qty;
 
-    return {
+    list.push({
       id: `activity-${a.id}`,
       source: "activity",
       rawId: a.id,
@@ -201,8 +258,8 @@ export async function loadEntries(userId: number, employeeId: number): Promise<E
       status: a.status,
       attachmentName: null,
       createdAt: a.createdAt,
-    };
-  });
+    });
+  }
 
   list.sort((x, y) => (x.date === y.date ? y.createdAt.localeCompare(x.createdAt) : y.date.localeCompare(x.date)));
   return list;
@@ -289,5 +346,5 @@ export async function loadAttendance(employeeId: number): Promise<AttendanceReco
   }
 
   const store = getMemoryStore();
-  return store.attendance;
+  return store.attendance.filter((a) => a.employeeId === employeeId);
 }

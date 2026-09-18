@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { reports } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { resolveEmployee, loadEntries, loadAttendance, sumEntries, groupByDate } from "@/lib/data";
-import { getMemoryStore } from "@/lib/dataStore";
+import { getMemoryStore, saveToDisk } from "@/lib/dataStore";
 import { addDays, dateKey, formatDuration, isWeekend, parseDateStr, productivityScore, toDateStr, workingDaysBetween } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,9 @@ export async function GET(request: Request) {
           .filter((r) => !userId || r.userId === Number(userId))
           .map((r) => ({ ...r, weekStart: dateKey(r.weekStart), weekEnd: dateKey(r.weekEnd), createdAt: new Date(r.createdAt).toISOString() }));
         return NextResponse.json({ reports: list });
-      } catch (e) {}
+      } catch (e) {
+        console.warn("Reports DB GET bypassed, utilizing active data store.");
+      }
     }
 
     const store = getMemoryStore();
@@ -116,9 +118,41 @@ export async function POST(request: Request) {
       averageScore: avgScore,
     });
 
+    if (process.env.DATABASE_URL) {
+      try {
+        const [row] = await db
+          .insert(reports)
+          .values({
+            userId: user.id,
+            weekStart: start,
+            weekEnd: end,
+            title: `Weekly report · ${start} to ${end}`,
+            content,
+            keyAchievements: achievements.map((a) => `✓ ${a}`).join("\n"),
+            tasksInProgress: inProgress.map((p) => `• ${p}`).join("\n"),
+            nextWeekPlan: plan.map((p) => `• ${p}`).join("\n"),
+            metricsSnapshot,
+          })
+          .returning();
+
+        return NextResponse.json({
+          success: true,
+          report: {
+            ...row,
+            weekStart: dateKey(row.weekStart),
+            weekEnd: dateKey(row.weekEnd),
+            createdAt: new Date(row.createdAt).toISOString(),
+          },
+        });
+      } catch (dbErr) {
+        console.warn("Report DB POST bypassed, utilizing active data store.");
+      }
+    }
+
     const store = getMemoryStore();
+    const newId = (store.reports.length > 0 ? Math.max(...store.reports.map((r) => r.id)) : 0) + 1;
     const newReport = {
-      id: store.reports.length + 1,
+      id: newId,
       userId: user.id,
       weekStart: start,
       weekEnd: end,
@@ -132,6 +166,7 @@ export async function POST(request: Request) {
     };
 
     store.reports.unshift(newReport);
+    saveToDisk(store);
 
     return NextResponse.json({
       success: true,
@@ -149,6 +184,36 @@ export async function PATCH(request: Request) {
     const { id, keyAchievements, tasksInProgress, nextWeekPlan, content } = body;
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
+    if (process.env.DATABASE_URL) {
+      try {
+        const updateSet: Record<string, string> = {};
+        if (keyAchievements !== undefined) updateSet.keyAchievements = keyAchievements;
+        if (tasksInProgress !== undefined) updateSet.tasksInProgress = tasksInProgress;
+        if (nextWeekPlan !== undefined) updateSet.nextWeekPlan = nextWeekPlan;
+        if (content !== undefined) updateSet.content = content;
+
+        const [row] = await db
+          .update(reports)
+          .set(updateSet)
+          .where(eq(reports.id, Number(id)))
+          .returning();
+
+        if (row) {
+          return NextResponse.json({
+            success: true,
+            report: {
+              ...row,
+              weekStart: dateKey(row.weekStart),
+              weekEnd: dateKey(row.weekEnd),
+              createdAt: new Date(row.createdAt).toISOString(),
+            },
+          });
+        }
+      } catch (dbErr) {
+        console.warn("Report DB PATCH bypassed, utilizing active data store.");
+      }
+    }
+
     const store = getMemoryStore();
     const report = store.reports.find((r) => r.id === Number(id));
     if (report) {
@@ -156,6 +221,7 @@ export async function PATCH(request: Request) {
       if (tasksInProgress !== undefined) report.tasksInProgress = tasksInProgress;
       if (nextWeekPlan !== undefined) report.nextWeekPlan = nextWeekPlan;
       if (content !== undefined) report.content = content;
+      saveToDisk(store);
       return NextResponse.json({ success: true, report });
     }
 
@@ -171,8 +237,18 @@ export async function DELETE(request: Request) {
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
+    if (process.env.DATABASE_URL) {
+      try {
+        await db.delete(reports).where(eq(reports.id, Number(id)));
+        return NextResponse.json({ success: true });
+      } catch (dbErr) {
+        console.warn("Report DB DELETE bypassed, utilizing active data store.");
+      }
+    }
+
     const store = getMemoryStore();
     store.reports = store.reports.filter((r) => r.id !== Number(id));
+    saveToDisk(store);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

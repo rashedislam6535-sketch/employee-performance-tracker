@@ -4,7 +4,7 @@ import { employees, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveEmployee, toProfile } from "@/lib/data";
 import { AVAILABILITY_OPTIONS, BLOOD_GROUPS } from "@/lib/utils";
-import { getMemoryStore } from "@/lib/dataStore";
+import { getMemoryStore, saveToDisk } from "@/lib/dataStore";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +105,7 @@ export async function PATCH(request: Request) {
       if (set.department !== undefined && set.department !== null) store.users[uIndex].department = set.department;
       if (set.photo !== undefined) store.users[uIndex].avatar = set.photo;
     }
+    saveToDisk(store);
 
     return NextResponse.json({
       success: true,

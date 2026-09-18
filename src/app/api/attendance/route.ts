@@ -4,7 +4,7 @@ import { attendance, breaks } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { resolveEmployee, buildAttendanceRecord } from "@/lib/data";
 import { toDateStr } from "@/lib/utils";
-import { getMemoryStore } from "@/lib/dataStore";
+import { getMemoryStore, saveToDisk } from "@/lib/dataStore";
 import type { AttendanceRecord } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ async function loadDay(employeeId: number, date: string): Promise<AttendanceReco
   }
 
   const store = getMemoryStore();
-  const found = store.attendance.find((a) => a.date === date);
+  const found = store.attendance.find((a) => a.employeeId === employeeId && a.date === date);
   return found || null;
 }
 
@@ -110,11 +110,13 @@ export async function POST(request: Request) {
     }
 
     // Memory Store Attendance Handler
-    let att = store.attendance.find((a) => a.date === date);
+    let att = store.attendance.find((a) => a.employeeId === employee.id && a.date === date);
 
     if (action === "check-in") {
       if (att?.checkIn) return fail("You are already checked in for today.");
       if (att) {
+        att.employeeId = employee.id;
+        att.userId = employee.userId;
         att.checkIn = now.toISOString();
         att.status = "working";
         att.location = location || "Headquarters (Desk)";
@@ -122,6 +124,8 @@ export async function POST(request: Request) {
       } else {
         att = {
           id: Date.now(),
+          employeeId: employee.id,
+          userId: employee.userId,
           date,
           checkIn: now.toISOString(),
           checkOut: null,
@@ -135,6 +139,7 @@ export async function POST(request: Request) {
         };
         store.attendance.unshift(att);
       }
+      saveToDisk(store);
       return NextResponse.json({ success: true, attendance: att });
     }
 
@@ -152,6 +157,7 @@ export async function POST(request: Request) {
       });
       att.onBreak = true;
       att.status = "on_break";
+      saveToDisk(store);
       return NextResponse.json({ success: true, attendance: att });
     }
 
@@ -165,6 +171,7 @@ export async function POST(request: Request) {
       att.breakMinutes += mins;
       att.onBreak = false;
       att.status = "working";
+      saveToDisk(store);
       return NextResponse.json({ success: true, attendance: att });
     }
 
@@ -182,6 +189,7 @@ export async function POST(request: Request) {
       const elapsed = Math.max(0, Math.round((now.getTime() - new Date(att.checkIn).getTime()) / 60000));
       att.workingMinutes = Math.max(0, elapsed - att.breakMinutes);
       att.status = "checked_out";
+      saveToDisk(store);
       return NextResponse.json({ success: true, attendance: att });
     }
 

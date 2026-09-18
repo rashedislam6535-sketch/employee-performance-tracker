@@ -261,28 +261,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Switch User Impersonation / Multi-user switch
   const switchUser = useCallback(
     async (userId: number) => {
-      const match = availableAccounts.find((a) => a.user.id === userId);
-      if (match) {
-        setCurrentUser(match.user);
-        setEmployee(match.employee);
-        try {
-          localStorage.setItem(
-            AUTH_KEY,
-            JSON.stringify({
-              user: match.user,
-              employee: match.employee,
-              token: `switch_${match.user.id}`,
-            })
-          );
-        } catch {}
-        toast({
-          title: `Switched view to ${match.user.name}`,
-          description: `Department: ${match.user.department}`,
-          variant: "default",
-        });
+      try {
+        const res = await fetch(`/api/dashboard?userId=${userId}`);
+        if (!res.ok) {
+          toast({ title: "Switch failed", description: "User record could not be loaded.", variant: "error" });
+          return;
+        }
+        const data = await res.json();
+        if (data.user) {
+          setCurrentUser(data.user);
+          if (data.employee) setEmployee(data.employee);
+          try {
+            localStorage.setItem(
+              AUTH_KEY,
+              JSON.stringify({
+                user: data.user,
+                employee: data.employee,
+                token: `switch_${data.user.id}`,
+              })
+            );
+          } catch {}
+          toast({
+            title: `Switched view to ${data.user.name}`,
+            description: `Role: ${data.user.role} · Department: ${data.user.department}`,
+            variant: "default",
+          });
+          setDataVersion((v) => v + 1);
+        }
+      } catch (err: any) {
+        toast({ title: "Could not switch user", description: err.message, variant: "error" });
       }
     },
-    [availableAccounts, toast]
+    [toast]
   );
 
   const persistRead = (ids: number[]) => {

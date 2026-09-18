@@ -75,6 +75,8 @@ export type AttendanceStatus = "not_checked_in" | "working" | "on_break" | "chec
 
 export interface AttendanceRecord {
   id: number;
+  employeeId?: number;
+  userId?: number;
   date: string;
   checkIn: string | null;
   checkOut: string | null;

@@ -97,7 +97,9 @@ export async function GET() {
         if (a.type === "training") totalTraining += a.quantity || 1;
       }
 
-      const att = store.attendance.find((a) => a.date === todayStr);
+      const att = store.attendance.find(
+        (a) => (a.employeeId === (emp?.id || user.id) || a.userId === user.id) && a.date === todayStr
+      );
 
       return {
         id: user.id,
